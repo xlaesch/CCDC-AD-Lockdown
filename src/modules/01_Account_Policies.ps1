@@ -39,7 +39,7 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
 
         foreach ($user in $users) {
             try {
-                $newPassword    = New-RandomPassword -Length 12
+                $newPassword    = New-RandomPassword -Length 16
                 $securePassword = ConvertTo-SecureString -String $newPassword -AsPlainText -Force
                 Set-ADAccountPassword -Identity $user.SamAccountName -NewPassword $securePassword -Reset
                 
@@ -73,8 +73,20 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     Write-Log -Message "Cleaning up Privileged Groups..." -Level "INFO" -LogFile $LogFile
     $groups = @("Domain Admins", "Enterprise Admins", "Administrators", "DnsAdmins", "Group Policy Creator Owners", "Schema Admins", "Key Admins", "Enterprise Key Admins")
 
+    # Get Built-in Administrator Name to exclude it even if renamed
+    $builtInAdminName = "Administrator"
+    try {
+        $domainSid = (Get-ADDomain).DomainSID.Value
+        $builtInAdmin = Get-ADUser -Identity "$domainSid-500" -ErrorAction SilentlyContinue
+        if ($builtInAdmin) {
+            $builtInAdminName = $builtInAdmin.SamAccountName
+        }
+    } catch {
+        Write-Log -Message "Could not determine built-in Administrator name by SID." -Level "WARNING" -LogFile $LogFile
+    }
+
     foreach ($group in $groups) {
-        $excludedSamAccountNames = @("Administrator", "Domain Admins", "Enterprise Admins") # Keep these safe
+        $excludedSamAccountNames = @("Administrator", "Domain Admins", "Enterprise Admins", $builtInAdminName) | Select-Object -Unique
 
         try {
             $members = Get-ADGroupMember -Identity $group -ErrorAction SilentlyContinue | Where-Object {

@@ -165,7 +165,7 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         foreach ($zone in $zones) {
             if ($zone.ZoneType -eq "Primary" -and $zone.IsAutoCreated -eq $false) {
                 try {
-                    Set-DnsServerPrimaryZone -Name $zone.ZoneName -DynamicUpdate SecureOnly -ErrorAction SilentlyContinue
+                    Set-DnsServerPrimaryZone -Name $zone.ZoneName -DynamicUpdate Secure -ErrorAction SilentlyContinue
                     Set-DnsServerZoneTransfer -Name $zone.ZoneName -SecureSecondaries TransferToSecureServers -ErrorAction SilentlyContinue
                 } catch {
                     Write-Log -Message "Failed to harden zone $($zone.ZoneName): $_" -Level "WARNING" -LogFile $LogFile
