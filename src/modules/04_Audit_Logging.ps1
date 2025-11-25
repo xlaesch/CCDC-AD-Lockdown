@@ -40,14 +40,41 @@ catch {
     Write-Log -Message "Failed to set RunAsPPL: $_" -Level "ERROR" -LogFile $LogFile
 }
 
-# --- 3. Logon/Logoff Audit Policy ---
-Write-Log -Message "Configuring Logon/Logoff Audit Policy..." -Level "INFO" -LogFile $LogFile
+# --- 3. Logon/Logoff Audit Policy (Advanced) ---
+Write-Log -Message "Configuring Advanced Audit Policy..." -Level "INFO" -LogFile $LogFile
 try {
-    $auditResult = auditpol /set /category:"Logon/Logoff" /success:enable /failure:enable 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Log -Message "Audit policy for Logon/Logoff configured (Success and Failure)." -Level "SUCCESS" -LogFile $LogFile
-    } else {
-        Write-Log -Message "Failed to configure audit policy: $auditResult" -Level "ERROR" -LogFile $LogFile
+    # Force Advanced Audit Policy
+    Set-RegistryValue -Path "HKLM:\System\CurrentControlSet\Control\Lsa" -Name "SCENoApplyLegacyAuditPolicy" -Value 1 -Type DWord
+
+    $auditRules = @(
+        "Account Logon,Kerberos Authentication Service,Success and Failure",
+        "Account Logon,Kerberos Service Ticket Operations,Success and Failure",
+        "Account Management,Computer Account Management,Success and Failure",
+        "Account Management,Security Group Management,Success and Failure",
+        "Account Management,User Account Management,Success and Failure",
+        "Detailed Tracking,DPAPI Activity,Success and Failure",
+        "Detailed Tracking,Process Creation,Success and Failure",
+        "Logon/Logoff,Logoff,Success and Failure",
+        "Logon/Logoff,Logon,Success and Failure",
+        "Logon/Logoff,Special Logon,Success and Failure",
+        "Object Access,Detailed File Share,Failure", # Good for noise reduction, but useful
+        "Policy Change,Authentication Policy Change,Success and Failure",
+        "Privilege Use,Sensitive Privilege Use,Success and Failure",
+        "System,Security System Extension,Success and Failure"
+    )
+
+    foreach ($rule in $auditRules) {
+        $parts = $rule -split ","
+        $category = $parts[0]
+        $subcategory = $parts[1]
+        $setting = $parts[2]
+        
+        $cmd = "auditpol /set /subcategory:`"$subcategory`" /success:enable /failure:enable"
+        if ($setting -eq "Failure") { $cmd = "auditpol /set /subcategory:`"$subcategory`" /success:disable /failure:enable" }
+        if ($setting -eq "Success") { $cmd = "auditpol /set /subcategory:`"$subcategory`" /success:enable /failure:disable" }
+
+        Invoke-Expression $cmd | Out-Null
+        Write-Log -Message "Configured Audit: $subcategory -> $setting" -Level "SUCCESS" -LogFile $LogFile
     }
 }
 catch {

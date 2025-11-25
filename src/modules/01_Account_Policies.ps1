@@ -126,9 +126,22 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         Write-Log -Message "Failed to apply noPac mitigation: $_" -Level "ERROR" -LogFile $LogFile
     }
 
-    # --- 6. Administrator Password Policy ---
-    Write-Log -Message "Enforcing Password Policy for Administrator..." -Level "INFO" -LogFile $LogFile
+    # --- 6. Administrator Password Policy & Domain Password Policy ---
+    Write-Log -Message "Enforcing Password Policy..." -Level "INFO" -LogFile $LogFile
     try {
+        # Set Default Domain Password Policy (Min Length 15, Complexity Enabled, Lockout)
+        Set-ADDefaultDomainPasswordPolicy -Identity $env:USERDNSDOMAIN `
+            -MinPasswordLength 15 `
+            -ComplexityEnabled $true `
+            -LockoutDuration "00:30:00" `
+            -LockoutObservationWindow "00:30:00" `
+            -LockoutThreshold 10 `
+            -MaxPasswordAge "365.00:00:00" `
+            -MinPasswordAge "1.00:00:00" `
+            -PasswordHistoryCount 24 `
+            -ErrorAction SilentlyContinue
+        Write-Log -Message "Default Domain Password Policy updated (MinLen: 15)." -Level "SUCCESS" -LogFile $LogFile
+
         $adminUser = Get-ADUser -Identity "Administrator" -Properties PasswordNeverExpires
         if ($adminUser.PasswordNeverExpires -eq $true) {
             Set-ADUser -Identity "Administrator" -PasswordNeverExpires $false
@@ -138,7 +151,25 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         }
     }
     catch {
-        Write-Log -Message "Failed to update Administrator password policy: $_" -Level "ERROR" -LogFile $LogFile
+        Write-Log -Message "Failed to update Password Policy: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
+    # --- 6.1 Pre-Windows 2000 Compatible Access Cleanup ---
+    Write-Log -Message "Cleaning up 'Pre-Windows 2000 Compatible Access' group..." -Level "INFO" -LogFile $LogFile
+    try {
+        $pre2000Group = "Pre-Windows 2000 Compatible Access"
+        $members = Get-ADGroupMember -Identity $pre2000Group -ErrorAction SilentlyContinue
+        foreach ($member in $members) {
+            if ($member.Name -ne "Authenticated Users") {
+                Remove-ADGroupMember -Identity $pre2000Group -Members $member -Confirm:$false -ErrorAction SilentlyContinue
+                Write-Log -Message "Removed $($member.Name) from $pre2000Group." -Level "SUCCESS" -LogFile $LogFile
+            }
+        }
+        # Ensure Authenticated Users is present (per recommendation)
+        Add-ADGroupMember -Identity $pre2000Group -Members "Authenticated Users" -ErrorAction SilentlyContinue
+        Write-Log -Message "Verified 'Pre-Windows 2000 Compatible Access' membership." -Level "SUCCESS" -LogFile $LogFile
+    } catch {
+        Write-Log -Message "Failed to clean up Pre-Windows 2000 group: $_" -Level "ERROR" -LogFile $LogFile
     }
 
     # --- 7. Account Cleanup & Hardening (Extended) ---
@@ -319,6 +350,95 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         Write-Log -Message "ForceUnlockLogon set to 1." -Level "SUCCESS" -LogFile $LogFile
     } catch {
         Write-Log -Message "Failed to set ForceUnlockLogon: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
+    # --- 12. Enable AD Recycle Bin ---
+    Write-Log -Message "Enabling AD Recycle Bin..." -Level "INFO" -LogFile $LogFile
+    try {
+        Enable-ADOptionalFeature -Identity 'Recycle Bin Feature' -Scope ForestOrConfigurationSet -Target $env:USERDNSDOMAIN -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Log -Message "AD Recycle Bin enabled." -Level "SUCCESS" -LogFile $LogFile
+    } catch {
+        Write-Log -Message "Failed to enable Recycle Bin (or already enabled): $_" -Level "INFO" -LogFile $LogFile
+    }
+
+    # --- 13. Protected Users Group (Privileged Accounts) ---
+    Write-Log -Message "Adding Admins to Protected Users group..." -Level "INFO" -LogFile $LogFile
+    try {
+        $protectedGroup = Get-ADGroup -Identity "Protected Users" -ErrorAction SilentlyContinue
+        if ($protectedGroup) {
+            $adminGroups = @("Domain Admins", "Enterprise Admins", "Schema Admins", "Administrators", "Account Operators", "Backup Operators", "Print Operators", "Server Operators")
+            foreach ($g in $adminGroups) {
+                try {
+                    $members = Get-ADGroupMember -Identity $g -Recursive -ErrorAction SilentlyContinue
+                    foreach ($m in $members) {
+                        if ($m.ObjectClass -eq "user" -and $m.SamAccountName -ne "krbtgt" -and $m.SamAccountName -ne "Administrator") {
+                            Add-ADGroupMember -Identity "Protected Users" -Members $m -ErrorAction SilentlyContinue
+                            Write-Log -Message "Added $($m.SamAccountName) to Protected Users." -Level "SUCCESS" -LogFile $LogFile
+                        }
+                    }
+                } catch {
+                    Write-Log -Message "Group $g not found or empty." -Level "INFO" -LogFile $LogFile
+                }
+            }
+        }
+    } catch {
+        Write-Log -Message "Failed to update Protected Users: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
+    # --- 14. Clear RODC Allowed Group ---
+    Write-Log -Message "Clearing 'Allowed RODC Password Replication Group'..." -Level "INFO" -LogFile $LogFile
+    try {
+        $rodcGroup = "Allowed RODC Password Replication Group"
+        $members = Get-ADGroupMember -Identity $rodcGroup -ErrorAction SilentlyContinue
+        if ($members) {
+            Remove-ADGroupMember -Identity $rodcGroup -Members $members -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Log -Message "Cleared members from '$rodcGroup'." -Level "SUCCESS" -LogFile $LogFile
+        }
+    } catch {
+        Write-Log -Message "Failed to clear RODC group: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
+    # --- 15. Cleanup Orphaned SIDs and Dangerous Delegations on OUs ---
+    Write-Log -Message "Cleaning up Orphaned SIDs and Dangerous Delegations on OUs..." -Level "INFO" -LogFile $LogFile
+    try {
+        $ous = Get-ADOrganizationalUnit -Filter *
+        foreach ($ou in $ous) {
+            $acl = Get-Acl -Path "AD:\$($ou.DistinguishedName)"
+            $needsUpdate = $false
+            
+            # Create a copy of rules to iterate safely
+            $rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+            
+            foreach ($rule in $rules) {
+                # Check for Orphaned SIDs (IdentityReference fails to translate)
+                try {
+                    $sid = $rule.IdentityReference
+                    $obj = $sid.Translate([System.Security.Principal.NTAccount])
+                    $identityName = $obj.Value
+                } catch {
+                    # Translation failed -> Orphaned SID
+                    $acl.RemoveAccessRule($rule) | Out-Null
+                    $needsUpdate = $true
+                    Write-Log -Message "Removed Orphaned SID $($rule.IdentityReference) from $($ou.DistinguishedName)" -Level "SUCCESS" -LogFile $LogFile
+                    continue
+                }
+
+                # Check for Everyone/Authenticated Users with Write/FullControl
+                if ($identityName -match "Everyone|Authenticated Users") {
+                    if ($rule.ActiveDirectoryRights -match "GenericAll|Write|Delete|CreateChild|GenericWrite|WriteDacl|WriteOwner") {
+                         $acl.RemoveAccessRule($rule) | Out-Null
+                         $needsUpdate = $true
+                         Write-Log -Message "Removed dangerous permission for $identityName from $($ou.DistinguishedName)" -Level "SUCCESS" -LogFile $LogFile
+                    }
+                }
+            }
+            
+            if ($needsUpdate) {
+                Set-Acl -Path "AD:\$($ou.DistinguishedName)" -AclObject $acl
+            }
+        }
+    } catch {
+        Write-Log -Message "Failed to clean delegations: $_" -Level "ERROR" -LogFile $LogFile
     }
 
 } else {
