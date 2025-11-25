@@ -41,7 +41,8 @@ catch {
 # Check for SYSTEM privileges and Relaunch if needed
 $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $p = New-Object System.Security.Principal.WindowsPrincipal($id)
-$IsSystem = $p.IsInRole([System.Security.Principal.WindowsBuiltInRole]::System)
+# Use SID for LocalSystem (S-1-5-18) to avoid enum resolution issues
+$IsSystem = $p.IsInRole([System.Security.Principal.SecurityIdentifier]"S-1-5-18")
 
 if (-not $IsSystem) {
     Write-Log -Message "Not running as SYSTEM. Attempting to elevate using PsExec..." -Level "INFO" -LogFile $LogFile
