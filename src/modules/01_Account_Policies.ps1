@@ -83,11 +83,11 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
 
             foreach ($member in $members) {
                 try {
-                    Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false
+                    Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false -ErrorAction Stop
                     Write-Log -Message "Removed $($member.SamAccountName) from $group." -Level "SUCCESS" -LogFile $LogFile
                 }
                 catch {
-                    Write-Log -Message "Failed to remove group member $($member.SamAccountName) from $group." -Level "ERROR" -LogFile $LogFile
+                    Write-Log -Message "Failed to remove group member $($member.SamAccountName) from $group. Reason: $_" -Level "ERROR" -LogFile $LogFile
                 }
             }
         } catch {
@@ -142,12 +142,22 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
             -ErrorAction SilentlyContinue
         Write-Log -Message "Default Domain Password Policy updated (MinLen: 15)." -Level "SUCCESS" -LogFile $LogFile
 
-        $adminUser = Get-ADUser -Identity "Administrator" -Properties PasswordNeverExpires
-        if ($adminUser.PasswordNeverExpires -eq $true) {
-            Set-ADUser -Identity "Administrator" -PasswordNeverExpires $false
-            Write-Log -Message "PasswordNeverExpires set to false for Administrator." -Level "SUCCESS" -LogFile $LogFile
-        } else {
-            Write-Log -Message "Administrator already has PasswordNeverExpires set to false." -Level "INFO" -LogFile $LogFile
+        $adminUser = $null
+        try {
+            # Find Administrator by well-known SID (DomainSID-500) to handle renamed accounts
+            $domainSid = (Get-ADDomain).DomainSID.Value
+            $adminUser = Get-ADUser -Identity "$domainSid-500" -Properties PasswordNeverExpires -ErrorAction Stop
+        } catch {
+            Write-Log -Message "Could not find built-in Administrator account by SID." -Level "WARNING" -LogFile $LogFile
+        }
+
+        if ($adminUser) {
+            if ($adminUser.PasswordNeverExpires -eq $true) {
+                Set-ADUser -Identity $adminUser -PasswordNeverExpires $false
+                Write-Log -Message "PasswordNeverExpires set to false for Administrator ($($adminUser.SamAccountName))." -Level "SUCCESS" -LogFile $LogFile
+            } else {
+                Write-Log -Message "Administrator ($($adminUser.SamAccountName)) already has PasswordNeverExpires set to false." -Level "INFO" -LogFile $LogFile
+            }
         }
     }
     catch {
@@ -160,14 +170,21 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         $pre2000Group = "Pre-Windows 2000 Compatible Access"
         $members = Get-ADGroupMember -Identity $pre2000Group -ErrorAction SilentlyContinue
         foreach ($member in $members) {
-            if ($member.Name -ne "Authenticated Users") {
+            if ($member.SID.Value -ne "S-1-5-11") { # S-1-5-11 is Authenticated Users
                 Remove-ADGroupMember -Identity $pre2000Group -Members $member -Confirm:$false -ErrorAction SilentlyContinue
                 Write-Log -Message "Removed $($member.Name) from $pre2000Group." -Level "SUCCESS" -LogFile $LogFile
             }
         }
-        # Ensure Authenticated Users is present (per recommendation)
-        Add-ADGroupMember -Identity $pre2000Group -Members "Authenticated Users" -ErrorAction SilentlyContinue
-        Write-Log -Message "Verified 'Pre-Windows 2000 Compatible Access' membership." -Level "SUCCESS" -LogFile $LogFile
+        # Ensure Authenticated Users is present (per recommendation) using SID
+        try {
+            Add-ADGroupMember -Identity $pre2000Group -Members "S-1-5-11" -ErrorAction Stop
+            Write-Log -Message "Verified 'Pre-Windows 2000 Compatible Access' membership." -Level "SUCCESS" -LogFile $LogFile
+        } catch {
+            # Ignore if already exists
+            if ($_ -notmatch "already a member") {
+                 Write-Log -Message "Failed to add Authenticated Users to Pre-2000 group: $_" -Level "WARNING" -LogFile $LogFile
+            }
+        }
     } catch {
         Write-Log -Message "Failed to clean up Pre-Windows 2000 group: $_" -Level "ERROR" -LogFile $LogFile
     }
@@ -188,7 +205,13 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         $domainUsersGroup = Get-ADGroup "Domain Users" -Properties primaryGroupToken
         if ($domainUsersGroup) {
             Get-ADUser -Filter * | ForEach-Object {
-                Set-ADUser $_ -Replace @{primaryGroupID=$domainUsersGroup.primaryGroupToken} -ErrorAction SilentlyContinue
+                try {
+                    # Ensure user is a member of Domain Users before setting primary group
+                    Add-ADGroupMember -Identity $domainUsersGroup -Members $_ -ErrorAction SilentlyContinue
+                    Set-ADUser $_ -Replace @{primaryGroupID=$domainUsersGroup.primaryGroupToken} -ErrorAction Stop
+                } catch {
+                    Write-Log -Message "Failed to set primary group for $($_.SamAccountName): $_" -Level "WARNING" -LogFile $LogFile
+                }
             }
             Write-Log -Message "Set Primary Group to 'Domain Users' for all users." -Level "SUCCESS" -LogFile $LogFile
         }
@@ -366,20 +389,34 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     try {
         $protectedGroup = Get-ADGroup -Identity "Protected Users" -ErrorAction SilentlyContinue
         if ($protectedGroup) {
-            $adminGroups = @("Domain Admins", "Enterprise Admins", "Schema Admins", "Administrators", "Account Operators", "Backup Operators", "Print Operators", "Server Operators")
+            # Get current members to avoid duplicate attempts/logs
+            $currentProtectedMembers = Get-ADGroupMember -Identity "Protected Users" | Select-Object -ExpandProperty SamAccountName
+
+            # Dynamically identify privileged groups (Protected Groups have AdminCount=1)
+            # This ensures we catch all high-privilege groups defined by AD (SDProp), not just a hardcoded list.
+            $adminGroups = Get-ADGroup -Filter {AdminCount -eq 1}
             foreach ($g in $adminGroups) {
                 try {
                     $members = Get-ADGroupMember -Identity $g -Recursive -ErrorAction SilentlyContinue
                     foreach ($m in $members) {
-                        if ($m.ObjectClass -eq "user" -and $m.SamAccountName -ne "krbtgt" -and $m.SamAccountName -ne "Administrator") {
-                            Add-ADGroupMember -Identity "Protected Users" -Members $m -ErrorAction SilentlyContinue
-                            Write-Log -Message "Added $($m.SamAccountName) to Protected Users." -Level "SUCCESS" -LogFile $LogFile
+                        if ($m.ObjectClass -eq "user" -and $m.SamAccountName -ne "krbtgt" -and $m.SamAccountName -ne "Administrator" -and $m.SamAccountName -notin $currentProtectedMembers) {
+                            try {
+                                Add-ADGroupMember -Identity "Protected Users" -Members $m -ErrorAction Stop
+                                Write-Log -Message "Added $($m.SamAccountName) to Protected Users." -Level "SUCCESS" -LogFile $LogFile
+                                $currentProtectedMembers += $m.SamAccountName # Update local list
+                            } catch {
+                                Write-Log -Message "Failed to add $($m.SamAccountName) to Protected Users: $_" -Level "ERROR" -LogFile $LogFile
+                            }
                         }
                     }
                 } catch {
                     Write-Log -Message "Group $g not found or empty." -Level "INFO" -LogFile $LogFile
                 }
             }
+
+            # Dynamic check for other high-privilege accounts (e.g. AdminCount=1) could be added here
+            # For now, we rely on the standard admin groups defined above.
+
         }
     } catch {
         Write-Log -Message "Failed to update Protected Users: $_" -Level "ERROR" -LogFile $LogFile
@@ -401,6 +438,25 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     # --- 15. Cleanup Orphaned SIDs and Dangerous Delegations on OUs ---
     Write-Log -Message "Cleaning up Orphaned SIDs and Dangerous Delegations on OUs..." -Level "INFO" -LogFile $LogFile
     try {
+        # Groups to remove dangerous permissions from (Dynamic check)
+        $targetGroups = @(
+            "Everyone",
+            "Authenticated Users",
+            "BUILTIN\Users",
+            "Domain Users"
+        )
+
+        # Dangerous permissions to look for
+        $dangerousRights = @(
+            "GenericAll",
+            "GenericWrite",
+            "WriteDacl",
+            "WriteOwner",
+            "CreateChild",
+            "ExtendedRight",
+            "WriteProperty"
+        )
+
         $ous = Get-ADOrganizationalUnit -Filter *
         foreach ($ou in $ous) {
             $acl = Get-Acl -Path "AD:\$($ou.DistinguishedName)"
@@ -423,12 +479,24 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
                     continue
                 }
 
-                # Check for Everyone/Authenticated Users with Write/FullControl
-                if ($identityName -match "Everyone|Authenticated Users") {
-                    if ($rule.ActiveDirectoryRights -match "GenericAll|Write|Delete|CreateChild|GenericWrite|WriteDacl|WriteOwner") {
-                         $acl.RemoveAccessRule($rule) | Out-Null
-                         $needsUpdate = $true
-                         Write-Log -Message "Removed dangerous permission for $identityName from $($ou.DistinguishedName)" -Level "SUCCESS" -LogFile $LogFile
+                # Dynamic Cleanup: Check if Identity matches target groups and has dangerous rights
+                $isTargetGroup = $false
+                foreach ($group in $targetGroups) {
+                    if ($identityName -like "*$group*") {
+                        $isTargetGroup = $true
+                        break
+                    }
+                }
+
+                if ($isTargetGroup) {
+                    $rights = $rule.ActiveDirectoryRights.ToString()
+                    foreach ($danger in $dangerousRights) {
+                        if ($rights -match $danger) {
+                            $acl.RemoveAccessRule($rule) | Out-Null
+                            $needsUpdate = $true
+                            Write-Log -Message "Removed dangerous permission '$danger' for '$identityName' on '$($ou.DistinguishedName)'" -Level "SUCCESS" -LogFile $LogFile
+                            break
+                        }
                     }
                 }
             }

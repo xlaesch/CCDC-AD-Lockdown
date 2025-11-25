@@ -129,7 +129,7 @@ foreach ($engine in $scriptEngines) {
         New-NetFirewallRule -DisplayName "Block Outbound $engine (SysWOW64)" -Direction Outbound -Program "%SystemRoot%\SysWOW64\$engine" -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
         Write-Log -Message "Blocked outbound traffic for $engine" -Level "SUCCESS" -LogFile $LogFile
     } catch {
-        Write-Log -Message "Failed to block $engine: $_" -Level "WARNING" -LogFile $LogFile
+        Write-Log -Message "Failed to block ${engine}: $_" -Level "WARNING" -LogFile $LogFile
     }
 }
 

@@ -46,21 +46,22 @@ try {
     # Force Advanced Audit Policy
     Set-RegistryValue -Path "HKLM:\System\CurrentControlSet\Control\Lsa" -Name "SCENoApplyLegacyAuditPolicy" -Value 1 -Type DWord
 
+    # Audit Rules based on ADSecurity.org and CCDC Audit Requirements (A-AuditDC)
     $auditRules = @(
-        "Account Logon,Kerberos Authentication Service,Success and Failure",
-        "Account Logon,Kerberos Service Ticket Operations,Success and Failure",
-        "Account Management,Computer Account Management,Success and Failure",
-        "Account Management,Security Group Management,Success and Failure",
-        "Account Management,User Account Management,Success and Failure",
-        "Detailed Tracking,DPAPI Activity,Success and Failure",
-        "Detailed Tracking,Process Creation,Success and Failure",
-        "Logon/Logoff,Logoff,Success and Failure",
-        "Logon/Logoff,Logon,Success and Failure",
-        "Logon/Logoff,Special Logon,Success and Failure",
-        "Object Access,Detailed File Share,Failure", # Good for noise reduction, but useful
-        "Policy Change,Authentication Policy Change,Success and Failure",
-        "Privilege Use,Sensitive Privilege Use,Success and Failure",
-        "System,Security System Extension,Success and Failure"
+        "Account Logon,Kerberos Authentication Service,Success and Failure",      # Events 4768, 4771
+        "Account Logon,Kerberos Service Ticket Operations,Success and Failure",   # Event 4769
+        "Account Management,Computer Account Management,Success and Failure",     # Events 4741, 4742
+        "Account Management,Security Group Management,Success and Failure",       # Events 4728, 4732, 4756
+        "Account Management,User Account Management,Success and Failure",         # Events 4720, 4722, etc.
+        "Detailed Tracking,DPAPI Activity,Success and Failure",                   # Event 4692
+        "Detailed Tracking,Process Creation,Success and Failure",                 # Event 4688
+        "Logon/Logoff,Logoff,Success and Failure",                                # Event 4634
+        "Logon/Logoff,Logon,Success and Failure",                                 # Events 4624, 4625, 4648
+        "Logon/Logoff,Special Logon,Success and Failure",                         # Event 4964
+        "Object Access,Detailed File Share,Failure",                              # Noise reduction
+        "Policy Change,Authentication Policy Change,Success and Failure",          # Events 4713, 4716, etc.
+        "Privilege Use,Sensitive Privilege Use,Success and Failure",              # Events 4672, 4673, 4674
+        "System,Security System Extension,Success and Failure"                    # Events 4610, 4697
     )
 
     foreach ($rule in $auditRules) {

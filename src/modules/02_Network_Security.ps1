@@ -67,14 +67,16 @@ try {
     # Disable mDNS
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters" -Name "EnableMDNS" -Value 0 -Type DWord
 
-    # Hardened UNC Paths
+    # Hardened UNC Paths (A-HardenedPaths / MS15-011 / MS15-014)
     $hardenedPathsKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider\HardenedPaths"
     if (-not (Test-Path $hardenedPathsKey)) {
         New-Item -Path $hardenedPathsKey -Force | Out-Null
     }
-    Set-ItemProperty -Path $hardenedPathsKey -Name "\\*\NETLOGON" -Value "RequireMutualAuthentication=1, RequireIntegrity=1" -Force
-    Set-ItemProperty -Path $hardenedPathsKey -Name "\\*\SYSVOL" -Value "RequireMutualAuthentication=1, RequireIntegrity=1" -Force
-    Write-Log -Message "Hardened UNC Paths configured." -Level "SUCCESS" -LogFile $LogFile
+    # Require Mutual Authentication and Integrity for NETLOGON and SYSVOL
+    Set-ItemProperty -Path $hardenedPathsKey -Name "\\*\NETLOGON" -Value "RequireMutualAuthentication=1, RequireIntegrity=1" -Type String -Force
+    Set-ItemProperty -Path $hardenedPathsKey -Name "\\*\SYSVOL" -Value "RequireMutualAuthentication=1, RequireIntegrity=1" -Type String -Force
+    
+    Write-Log -Message "Hardened UNC Paths configured (Integrity/MutualAuth)." -Level "SUCCESS" -LogFile $LogFile
 
     Write-Log -Message "Extended SMB/Network hardening applied." -Level "SUCCESS" -LogFile $LogFile
 } catch {
