@@ -332,17 +332,17 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     # Mitigate RID Hijacking (ResetData)
     try {
         $usersKey = "HKLM:\SAM\SAM\Domains\Account\Users"
-        if (Test-Path $usersKey) {
-            Get-ChildItem $usersKey | ForEach-Object {
+        if (Test-Path $usersKey -ErrorAction SilentlyContinue) {
+            Get-ChildItem $usersKey -ErrorAction Stop | ForEach-Object {
                 $name = $_.PSChildName
-                if ((Get-ItemProperty -Path "$usersKey\$name").ResetData) {
+                if ((Get-ItemProperty -Path "$usersKey\$name" -ErrorAction SilentlyContinue).ResetData) {
                     Remove-ItemProperty -Path "$usersKey\$name" -Name "ResetData" -Force -ErrorAction SilentlyContinue
                 }
             }
             Write-Log -Message "Removed ResetData registry keys (RID Hijacking mitigation)." -Level "SUCCESS" -LogFile $LogFile
         }
     } catch {
-        Write-Log -Message "Failed to mitigate RID Hijacking: $_" -Level "ERROR" -LogFile $LogFile
+        Write-Log -Message "Failed to mitigate RID Hijacking (Requires SYSTEM privileges): $_" -Level "WARNING" -LogFile $LogFile
     }
 
     # --- 10. AdminSDHolder ACL Reset (Hardened SDDL) ---

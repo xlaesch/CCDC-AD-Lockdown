@@ -26,8 +26,59 @@ if (-not (Test-Path $LogDir)) {
 . "$ScriptRoot/src/functions/Write-Log.ps1"
 . "$ScriptRoot/src/functions/Set-RegistryValue.ps1"
 . "$ScriptRoot/src/functions/New-RandomPassword.ps1"
+. "$ScriptRoot/src/functions/Install-Sysinternals.ps1"
 
 Write-Log -Message "=== Starting AD Hardening Process ===" -Level "INFO" -LogFile $LogFile
+
+# Install Sysinternals
+try {
+    Install-Sysinternals -LogFile $LogFile
+}
+catch {
+    Write-Warning "Sysinternals installation failed. Check logs for details."
+}
+
+# Check for SYSTEM privileges and Relaunch if needed
+$id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$p = New-Object System.Security.Principal.WindowsPrincipal($id)
+$IsSystem = $p.IsInRole([System.Security.Principal.WindowsBuiltInRole]::System)
+
+if (-not $IsSystem) {
+    Write-Log -Message "Not running as SYSTEM. Attempting to elevate using PsExec..." -Level "INFO" -LogFile $LogFile
+    
+    $PsExecPath = "C:\Sysinternals\PsExec.exe"
+    if (-not (Test-Path $PsExecPath)) {
+         Write-Warning "PsExec not found at $PsExecPath. Cannot elevate."
+         exit
+    }
+    
+    # Reconstruct arguments
+    $ScriptPath = $PSCommandPath
+    $ArgsString = ""
+    if ($ConfigFile -ne "conf/defaults.json") { $ArgsString += " -ConfigFile `"$ConfigFile`"" }
+    if ($All) { $ArgsString += " -All" }
+    if ($IncludeModule) { 
+         $modules = $IncludeModule -join ","
+         $ArgsString += " -IncludeModule $modules" 
+    }
+    
+    # Launch as SYSTEM
+    # -i: Interactive (so we can see the menu if needed)
+    # -s: System account
+    # -accepteula: Accept EULA automatically
+    # -w: Working directory
+    
+    $CmdArgs = "-i -s -accepteula -w `"$PSScriptRoot`" powershell.exe -ExecutionPolicy Bypass -File `"$ScriptPath`"$ArgsString"
+    
+    Write-Log -Message "Relaunching as SYSTEM: $PsExecPath $CmdArgs" -Level "INFO" -LogFile $LogFile
+    
+    Start-Process -FilePath $PsExecPath -ArgumentList $CmdArgs -Wait
+    
+    Write-Log -Message "Child process finished. Exiting parent." -Level "INFO" -LogFile $LogFile
+    exit
+}
+
+Write-Log -Message "Running as SYSTEM. Proceeding with hardening..." -Level "INFO" -LogFile $LogFile
 
 # Define Available Modules
 $AvailableModules = @(
