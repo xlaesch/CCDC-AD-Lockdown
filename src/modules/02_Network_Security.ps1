@@ -125,15 +125,23 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     try {
         # SIGRed Mitigation
         Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\DNS\Parameters" -Name "TcpReceivePacketSize" -Value 0xFF00 -Type DWord
-        
+
         # Global Query Block List
         dnscmd /config /enableglobalqueryblocklist 1 | Out-Null
-        
+
         # Response Rate Limiting
         if (Get-Command Set-DnsServerResponseRateLimiting -ErrorAction SilentlyContinue) {
             Set-DnsServerRRL -Mode Enable -Force -ErrorAction SilentlyContinue
         }
-        
+
+        # DNS Socket Pool Size (Anti-DDoS)
+        dnscmd /config /SocketPoolSize 10000 | Out-Null
+        Write-Log -Message "DNS Socket Pool Size set to 10000." -Level "SUCCESS" -LogFile $LogFile
+
+        # DNS Cache Locking (Anti-Cache Poisoning)
+        dnscmd /config /CacheLockingPercent 100 | Out-Null
+        Write-Log -Message "DNS Cache Locking set to 100%." -Level "SUCCESS" -LogFile $LogFile
+
         Write-Log -Message "DNS Security settings applied." -Level "SUCCESS" -LogFile $LogFile
     } catch {
         Write-Log -Message "Failed to apply DNS Security: $_" -Level "ERROR" -LogFile $LogFile
@@ -204,25 +212,65 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     }
 }
 
-# --- 5. Zerologon Mitigation ---
-Write-Log -Message "Applying Zerologon Mitigation..." -Level "INFO" -LogFile $LogFile
+# --- 5. Zerologon Mitigation & Netlogon Hardening ---
+Write-Log -Message "Applying Zerologon Mitigation and Netlogon Hardening..." -Level "INFO" -LogFile $LogFile
 try {
-    $regResult = Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "FullSecureChannelProtection" -Value 1 -Type DWord
-    if ($regResult) {
-        Write-Log -Message "FullSecureChannelProtection enabled." -Level "SUCCESS" -LogFile $LogFile
+    $netlogonPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters"
+
+    # Zerologon Protection
+    Set-RegistryValue -Path $netlogonPath -Name "FullSecureChannelProtection" -Value 1 -Type DWord
+    Write-Log -Message "FullSecureChannelProtection enabled." -Level "SUCCESS" -LogFile $LogFile
+
+    # Remove Vulnerable Channel Allowlist
+    if (Test-Path -Path "$netlogonPath\vulnerablechannelallowlist") {
+        Remove-ItemProperty -Path $netlogonPath -Name "vulnerablechannelallowlist" -Force | Out-Null
+        Write-Log -Message "vulnerablechannelallowlist removed." -Level "SUCCESS" -LogFile $LogFile
     }
 
-    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters"
-    $regName = "vulnerablechannelallowlist"
-    if (Test-Path -Path "$regPath\$regName") {
-        Remove-ItemProperty -Path $regPath -Name $regName -Force | Out-Null
-        Write-Log -Message "vulnerablechannelallowlist removed." -Level "SUCCESS" -LogFile $LogFile
-    } else {
-        Write-Log -Message "vulnerablechannelallowlist does not exist, no action needed." -Level "INFO" -LogFile $LogFile
-    }
+    # Netlogon Secure Channel Hardening (AD-Specific)
+    Set-RegistryValue -Path $netlogonPath -Name "RequireSignOrSeal" -Value 1 -Type DWord
+    Set-RegistryValue -Path $netlogonPath -Name "SealSecureChannel" -Value 1 -Type DWord
+    Set-RegistryValue -Path $netlogonPath -Name "SignSecureChannel" -Value 1 -Type DWord
+    Set-RegistryValue -Path $netlogonPath -Name "RequireStrongKey" -Value 1 -Type DWord
+    Write-Log -Message "Netlogon secure channel hardening applied (Sign/Seal/StrongKey)." -Level "SUCCESS" -LogFile $LogFile
 }
 catch {
-    Write-Log -Message "Failed to apply Zerologon mitigation: $_" -Level "ERROR" -LogFile $LogFile
+    Write-Log -Message "Failed to apply Netlogon hardening: $_" -Level "ERROR" -LogFile $LogFile
+}
+
+# --- 6. NTLM Security Levels (AD-Specific) ---
+Write-Log -Message "Configuring NTLM Minimum Security Levels..." -Level "INFO" -LogFile $LogFile
+try {
+    # NTLMv2 Session Security (Require NTLMv2, 128-bit encryption)
+    # Value 537395200 = 0x20080000 = Require NTLMv2 + 128-bit encryption
+    Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinClientSec" -Value 537395200 -Type DWord
+    Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinServerSec" -Value 537395200 -Type DWord
+    Write-Log -Message "NTLM minimum security levels set (NTLMv2 + 128-bit)." -Level "SUCCESS" -LogFile $LogFile
+}
+catch {
+    Write-Log -Message "Failed to configure NTLM security levels: $_" -Level "ERROR" -LogFile $LogFile
+}
+
+# --- 7. Additional LSA Hardening (AD-Specific Anonymous Access Prevention) ---
+Write-Log -Message "Applying Additional LSA Hardening..." -Level "INFO" -LogFile $LogFile
+try {
+    $lsaPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+
+    # Prevent Anonymous Access to AD
+    Set-RegistryValue -Path $lsaPath -Name "RestrictAnonymous" -Value 1 -Type DWord
+    Set-RegistryValue -Path $lsaPath -Name "RestrictAnonymousSAM" -Value 1 -Type DWord
+    Set-RegistryValue -Path $lsaPath -Name "EveryoneIncludesAnonymous" -Value 0 -Type DWord
+
+    # Disable Default Admin Shares (C$, ADMIN$ auto-creation)
+    Set-RegistryValue -Path $lsaPath -Name "NoDefaultAdminShares" -Value 1 -Type DWord
+
+    # Disable Storing Domain Credentials
+    Set-RegistryValue -Path $lsaPath -Name "DisableDomainCreds" -Value 1 -Type DWord
+
+    Write-Log -Message "LSA anonymous access prevention and credential hardening applied." -Level "SUCCESS" -LogFile $LogFile
+}
+catch {
+    Write-Log -Message "Failed to apply additional LSA hardening: $_" -Level "ERROR" -LogFile $LogFile
 }
 
 # --- 2. AD Firewall Rules ---
@@ -281,4 +329,42 @@ try {
     Write-Log -Message "Firewall logging enabled." -Level "SUCCESS" -LogFile $LogFile
 } catch {
     Write-Log -Message "Failed to enable firewall logging." -Level "ERROR" -LogFile $LogFile
+}
+
+# --- 8. Network Share Cleanup (DC-Specific) ---
+if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'") {
+    Write-Log -Message "Removing Unnecessary Network Shares..." -Level "INFO" -LogFile $LogFile
+    try {
+        $essentialShares = @("ADMIN$", "C$", "IPC$", "NETLOGON", "SYSVOL")
+        $sharesToRemove = Get-SmbShare | Where-Object { $_.Name -notin $essentialShares }
+
+        foreach ($share in $sharesToRemove) {
+            try {
+                Remove-SmbShare -Name $share.Name -Force -ErrorAction Stop
+                Write-Log -Message "Removed network share: $($share.Name)" -Level "SUCCESS" -LogFile $LogFile
+            }
+            catch {
+                Write-Log -Message "Failed to remove share $($share.Name): $_" -Level "WARNING" -LogFile $LogFile
+            }
+        }
+        Write-Log -Message "Network share cleanup completed." -Level "SUCCESS" -LogFile $LogFile
+    }
+    catch {
+        Write-Log -Message "Failed during network share cleanup: $_" -Level "ERROR" -LogFile $LogFile
+    }
+}
+
+# --- 9. Time Synchronization (Critical for Kerberos) ---
+Write-Log -Message "Synchronizing System Time..." -Level "INFO" -LogFile $LogFile
+try {
+    # Set timezone (adjust as needed for your environment)
+    tzutil /s "UTC" | Out-Null
+
+    # Force time resync with domain hierarchy
+    w32tm /resync /force | Out-Null
+
+    Write-Log -Message "System time synchronized successfully." -Level "SUCCESS" -LogFile $LogFile
+}
+catch {
+    Write-Log -Message "Failed to synchronize system time: $_" -Level "ERROR" -LogFile $LogFile
 }

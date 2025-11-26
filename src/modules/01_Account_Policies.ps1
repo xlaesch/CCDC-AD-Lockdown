@@ -521,6 +521,76 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         Write-Log -Message "Failed to clean delegations: $_" -Level "ERROR" -LogFile $LogFile
     }
 
+    # --- 16. DCSync Attack Mitigation ---
+    Write-Log -Message "Mitigating DCSync attack vectors..." -Level "INFO" -LogFile $LogFile
+    try {
+        # DCSync requires "Replicating Directory Changes" and "Replicating Directory Changes All" permissions
+        # These should ONLY be granted to Domain Controllers and specific admin accounts
+
+        $domainDN = (Get-ADDomain).DistinguishedName
+        $dcSyncPermissions = @(
+            "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2",  # DS-Replication-Get-Changes
+            "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2",  # DS-Replication-Get-Changes-All
+            "89e95b76-444d-4c62-991a-0facbeda640c"   # DS-Replication-Get-Changes-In-Filtered-Set
+        )
+
+        # Get ACL for domain root
+        $acl = Get-Acl -Path "AD:\$domainDN"
+        $modified = $false
+
+        # Whitelist: Domain Controllers, Enterprise Domain Controllers, Administrators
+        $allowedPrincipals = @()
+        try {
+            $allowedPrincipals += (Get-ADGroup "Domain Controllers").SID
+            $allowedPrincipals += (Get-ADGroup "Enterprise Domain Controllers" -ErrorAction SilentlyContinue).SID
+            $allowedPrincipals += (Get-ADGroup "Administrators").SID
+            # Well-known SID for SYSTEM and ENTERPRISE DOMAIN CONTROLLERS
+            $allowedPrincipals += New-Object System.Security.Principal.SecurityIdentifier("S-1-5-9")  # Enterprise Domain Controllers
+            $allowedPrincipals += New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18") # SYSTEM
+        }
+        catch {
+            Write-Log -Message "Error building allowed principals list: $_" -Level "WARNING" -LogFile $LogFile
+        }
+
+        # Check all ACEs for dangerous DCSync permissions
+        $accessRules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+        foreach ($rule in $accessRules) {
+            if ($rule.ObjectType -in $dcSyncPermissions) {
+                # Check if this identity is NOT in our whitelist
+                $isAllowed = $false
+                foreach ($allowedSid in $allowedPrincipals) {
+                    if ($rule.IdentityReference -eq $allowedSid) {
+                        $isAllowed = $true
+                        break
+                    }
+                }
+
+                if (-not $isAllowed) {
+                    try {
+                        $identityName = $rule.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value
+                        Write-Log -Message "Removing DCSync permission from unauthorized principal: $identityName" -Level "WARNING" -LogFile $LogFile
+                        $acl.RemoveAccessRule($rule) | Out-Null
+                        $modified = $true
+                    }
+                    catch {
+                        Write-Log -Message "Could not translate or remove SID: $($rule.IdentityReference)" -Level "WARNING" -LogFile $LogFile
+                    }
+                }
+            }
+        }
+
+        if ($modified) {
+            Set-Acl -Path "AD:\$domainDN" -AclObject $acl
+            Write-Log -Message "DCSync permissions removed from unauthorized principals." -Level "SUCCESS" -LogFile $LogFile
+        }
+        else {
+            Write-Log -Message "No unauthorized DCSync permissions found." -Level "SUCCESS" -LogFile $LogFile
+        }
+    }
+    catch {
+        Write-Log -Message "Failed to mitigate DCSync attack: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
 } else {
     Write-Log -Message "Not a Domain Controller. Skipping AD Account Policies." -Level "WARNING" -LogFile $LogFile
 }
