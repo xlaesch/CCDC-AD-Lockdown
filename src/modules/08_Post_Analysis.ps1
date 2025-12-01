@@ -56,7 +56,7 @@ if (-not (Test-Path $PingCastlePath)) {
 }
 
 if (Test-Path $PingCastlePath) {
-    Write-Log -Message "Found PingCastle at $PingCastlePath. Running health check..." -Level "INFO" -LogFile $LogFile
+        Write-Log -Message "Found PingCastle at $PingCastlePath. Running health check..." -Level "INFO" -LogFile $LogFile
     try {
         # Run PingCastle with --healthcheck (default) and --no-prompt
         # Adjust arguments as needed for the specific version/needs
