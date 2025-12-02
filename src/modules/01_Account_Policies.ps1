@@ -69,6 +69,25 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         Write-Log -Message "Failed to load ActiveDirectory module or query users: $_" -Level "ERROR" -LogFile $LogFile
     }
 
+    # --- 1.5 KRBTGT Password Reset (Golden Ticket Mitigation) ---
+    Write-Log -Message "Resetting KRBTGT password..." -Level "INFO" -LogFile $LogFile
+    try {
+        # Reset 1
+        $newPassword1 = New-RandomPassword -Length 32
+        $securePassword1 = ConvertTo-SecureString -String $newPassword1 -AsPlainText -Force
+        Set-ADAccountPassword -Identity "krbtgt" -NewPassword $securePassword1 -Reset
+        Write-Log -Message "KRBTGT password reset once." -Level "INFO" -LogFile $LogFile
+        
+        # Reset 2 (Invalidate history)
+        $newPassword2 = New-RandomPassword -Length 32
+        $securePassword2 = ConvertTo-SecureString -String $newPassword2 -AsPlainText -Force
+        Set-ADAccountPassword -Identity "krbtgt" -NewPassword $securePassword2 -Reset
+        Write-Log -Message "KRBTGT password reset twice (History invalidated)." -Level "SUCCESS" -LogFile $LogFile
+    }
+    catch {
+        Write-Log -Message "Failed to reset KRBTGT password: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
     # --- 2. Privileged Group Cleanup ---
     Write-Log -Message "Cleaning up Privileged Groups..." -Level "INFO" -LogFile $LogFile
     

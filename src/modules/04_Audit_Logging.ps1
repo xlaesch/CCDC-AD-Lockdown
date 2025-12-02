@@ -50,9 +50,12 @@ try {
     $auditRules = @(
         "Account Logon,Kerberos Authentication Service,Success and Failure",      # Events 4768, 4771
         "Account Logon,Kerberos Service Ticket Operations,Success and Failure",   # Event 4769
+        "Account Logon,Credential Validation,Success and Failure",                # Events 4776 (NTLM)
         "Account Management,Computer Account Management,Success and Failure",     # Events 4741, 4742
         "Account Management,Security Group Management,Success and Failure",       # Events 4728, 4732, 4756
         "Account Management,User Account Management,Success and Failure",         # Events 4720, 4722, etc.
+        "DS Access,Directory Service Access,Success and Failure",                 # AD Object Access
+        "DS Access,Directory Service Changes,Success and Failure",                # AD Object Changes (Critical for DCs)
         "Detailed Tracking,DPAPI Activity,Success and Failure",                   # Event 4692
         "Detailed Tracking,Process Creation,Success and Failure",                 # Event 4688
         "Logon/Logoff,Logoff,Success and Failure",                                # Event 4634
@@ -60,8 +63,10 @@ try {
         "Logon/Logoff,Special Logon,Success and Failure",                         # Event 4964
         "Object Access,Detailed File Share,Failure",                              # Noise reduction
         "Policy Change,Authentication Policy Change,Success and Failure",          # Events 4713, 4716, etc.
+        "Policy Change,Audit Policy Change,Success and Failure",                  # Audit Policy modifications
         "Privilege Use,Sensitive Privilege Use,Success and Failure",              # Events 4672, 4673, 4674
-        "System,Security System Extension,Success and Failure"                    # Events 4610, 4697
+        "System,Security System Extension,Success and Failure",                   # Events 4610, 4697
+        "System,Security State Change,Success and Failure"                        # System startup/shutdown, time change
     )
 
     foreach ($rule in $auditRules) {
