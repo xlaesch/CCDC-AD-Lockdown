@@ -18,6 +18,13 @@ Write-Log -Message "Starting Account Policies Hardening..." -Level "INFO" -LogFi
 # Check if we are on a Domain Controller
 if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'") {
     
+    # Setup Secrets Directory & File
+    $SecretsDir = "$PSScriptRoot/../../secrets"
+    if (-not (Test-Path $SecretsDir)) { New-Item -ItemType Directory -Path $SecretsDir -Force | Out-Null }
+    $PasswordFile = "$SecretsDir/rotated_passwords_$(Get-Date -Format 'yyyy-MM-dd_HH-mm').csv"
+    "SamAccountName,Password" | Out-File -FilePath $PasswordFile -Encoding ASCII
+    Write-Log -Message "Passwords will be saved to $PasswordFile" -Level "INFO" -LogFile $LogFile
+
     # --- 1. Domain User Password Rotation ---
     Write-Log -Message "Rotating Domain User Passwords..." -Level "INFO" -LogFile $LogFile
     
@@ -45,6 +52,7 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
                 
                 Write-Log -Message "Password changed for user: $($user.SamAccountName)" -Level "SUCCESS" -LogFile $LogFile
                 Write-Host "$($user.SamAccountName),$newPassword" # Output for operator visibility
+                "$($user.SamAccountName),$newPassword" | Out-File -FilePath $PasswordFile -Append -Encoding ASCII
                 
                 # Track group membership for reporting
                 $usersgroups = Get-ADPrincipalGroupMembership -Identity $user | Select-Object -ExpandProperty Name
@@ -77,15 +85,58 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         $securePassword1 = ConvertTo-SecureString -String $newPassword1 -AsPlainText -Force
         Set-ADAccountPassword -Identity "krbtgt" -NewPassword $securePassword1 -Reset
         Write-Log -Message "KRBTGT password reset once." -Level "INFO" -LogFile $LogFile
+        "krbtgt (Reset 1),$newPassword1" | Out-File -FilePath $PasswordFile -Append -Encoding ASCII
         
         # Reset 2 (Invalidate history)
         $newPassword2 = New-RandomPassword -Length 32
         $securePassword2 = ConvertTo-SecureString -String $newPassword2 -AsPlainText -Force
         Set-ADAccountPassword -Identity "krbtgt" -NewPassword $securePassword2 -Reset
         Write-Log -Message "KRBTGT password reset twice (History invalidated)." -Level "SUCCESS" -LogFile $LogFile
+        "krbtgt (Reset 2),$newPassword2" | Out-File -FilePath $PasswordFile -Append -Encoding ASCII
     }
     catch {
         Write-Log -Message "Failed to reset KRBTGT password: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
+    # --- 1.6 Encrypt Password File ---
+    if (Test-Path $PasswordFile) {
+        Write-Log -Message "Encrypting password file..." -Level "INFO" -LogFile $LogFile
+        try {
+            # Hardcoded Base64 Key
+            # TODO: Replace this with your specific Base64 key (must decode to 16, 24, or 32 bytes)
+            # Example 32-byte key generation: [Convert]::ToBase64String((1..32 | %{ Get-Random -Min 0 -Max 255 }))
+            $Base64Key = "YOUR_BASE64_KEY_HERE" 
+            
+            if ($Base64Key -eq "YOUR_BASE64_KEY_HERE") {
+                Write-Log -Message "Hardcoded key not set. Generating a temporary random key for this run." -Level "WARNING" -LogFile $LogFile
+                $KeyBytes = New-Object Byte[] 32
+                [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($KeyBytes)
+                $Base64Key = [Convert]::ToBase64String($KeyBytes)
+                Write-Log -Message "TEMPORARY KEY (Save this to decrypt): $Base64Key" -Level "WARNING" -LogFile $LogFile
+                Write-Host "TEMPORARY KEY: $Base64Key" -ForegroundColor Magenta
+            } else {
+                $KeyBytes = [Convert]::FromBase64String($Base64Key)
+            }
+            
+            # Read Content
+            $Content = Get-Content -Path $PasswordFile -Raw
+            
+            # Encrypt
+            $SecureString = ConvertTo-SecureString -String $Content -AsPlainText -Force
+            $EncryptedContent = ConvertFrom-SecureString -SecureString $SecureString -Key $KeyBytes
+            
+            # Save Encrypted File
+            $EncryptedFile = "$PasswordFile.enc"
+            $EncryptedContent | Out-File -FilePath $EncryptedFile -Encoding ASCII
+            
+            # Remove Original
+            Remove-Item -Path $PasswordFile -Force
+            
+            Write-Log -Message "Password file encrypted to $EncryptedFile using hardcoded key." -Level "SUCCESS" -LogFile $LogFile
+        }
+        catch {
+            Write-Log -Message "Failed to encrypt password file: $_" -Level "ERROR" -LogFile $LogFile
+        }
     }
 
     # --- 2. Privileged Group Cleanup ---
