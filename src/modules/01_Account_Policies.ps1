@@ -28,53 +28,58 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     # --- 1. Domain User Password Rotation ---
     Write-Log -Message "Rotating Domain User Passwords..." -Level "INFO" -LogFile $LogFile
     
-    try {
-        Import-Module ActiveDirectory -ErrorAction Stop
-        
-        $excludedGroups = @("Domain Admins", "Enterprise Admins")
-        $excludedUsers = foreach ($group in $excludedGroups) {
-            Get-ADGroupMember -Identity $group -Recursive | Select-Object -ExpandProperty SamAccountName
-        }
-        $excludedUsers = $excludedUsers | Select-Object -Unique
-        $excludedUsers += @("Administrator", "krbtgt", "Guest", "DefaultAccount")
-        
-        $users = Get-ADUser -Filter * | Where-Object {
-            ($_.SamAccountName -notin $excludedUsers)
-        }
+    $rotateChoice = Read-Host "Do you want to rotate ALL domain user passwords? (Y/N)"
+    if ($rotateChoice -eq "Y") {
+        try {
+            Import-Module ActiveDirectory -ErrorAction Stop
+            
+            $excludedGroups = @("Domain Admins", "Enterprise Admins")
+            $excludedUsers = foreach ($group in $excludedGroups) {
+                Get-ADGroupMember -Identity $group -Recursive | Select-Object -ExpandProperty SamAccountName
+            }
+            $excludedUsers = $excludedUsers | Select-Object -Unique
+            $excludedUsers += @("Administrator", "krbtgt", "Guest", "DefaultAccount")
+            
+            $users = Get-ADUser -Filter * | Where-Object {
+                ($_.SamAccountName -notin $excludedUsers)
+            }
 
-        $GroupUserMap = @{}
+            $GroupUserMap = @{}
 
-        foreach ($user in $users) {
-            try {
-                $newPassword    = New-RandomPassword -Length 16
-                $securePassword = ConvertTo-SecureString -String $newPassword -AsPlainText -Force
-                Set-ADAccountPassword -Identity $user.SamAccountName -NewPassword $securePassword -Reset
-                
-                Write-Log -Message "Password changed for user: $($user.SamAccountName)" -Level "SUCCESS" -LogFile $LogFile
-                Write-Host "$($user.SamAccountName),$newPassword" # Output for operator visibility
-                "$($user.SamAccountName),$newPassword" | Out-File -FilePath $PasswordFile -Append -Encoding ASCII
-                
-                # Track group membership for reporting
-                $usersgroups = Get-ADPrincipalGroupMembership -Identity $user | Select-Object -ExpandProperty Name
-                if ($usersgroups) {
-                    foreach ($groupName in $usersgroups) {
-                        if(!($GroupUserMap.ContainsKey($groupName))) {
-                            $GroupUserMap[$groupName] = New-Object System.Collections.ArrayList
+            foreach ($user in $users) {
+                try {
+                    $newPassword    = New-RandomPassword -Length 16
+                    $securePassword = ConvertTo-SecureString -String $newPassword -AsPlainText -Force
+                    Set-ADAccountPassword -Identity $user.SamAccountName -NewPassword $securePassword -Reset
+                    
+                    Write-Log -Message "Password changed for user: $($user.SamAccountName)" -Level "SUCCESS" -LogFile $LogFile
+                    Write-Host "$($user.SamAccountName),$newPassword" # Output for operator visibility
+                    "$($user.SamAccountName),$newPassword" | Out-File -FilePath $PasswordFile -Append -Encoding ASCII
+                    
+                    # Track group membership for reporting
+                    $usersgroups = Get-ADPrincipalGroupMembership -Identity $user | Select-Object -ExpandProperty Name
+                    if ($usersgroups) {
+                        foreach ($groupName in $usersgroups) {
+                            if(!($GroupUserMap.ContainsKey($groupName))) {
+                                $GroupUserMap[$groupName] = New-Object System.Collections.ArrayList
+                            }
+                            $null = $GroupUserMap[$groupName].Add([PSCustomObject]@{
+                                User     = $user.SamAccountName
+                                Password = $newPassword
+                            })
                         }
-                        $null = $GroupUserMap[$groupName].Add([PSCustomObject]@{
-                            User     = $user.SamAccountName
-                            Password = $newPassword
-                        })
                     }
+                } 
+                catch {
+                    Write-Log -Message "Failed to set password for user $($user.SamAccountName): $_" -Level "ERROR" -LogFile $LogFile
                 }
-            } 
-            catch {
-                Write-Log -Message "Failed to set password for user $($user.SamAccountName): $_" -Level "ERROR" -LogFile $LogFile
             }
         }
-    }
-    catch {
-        Write-Log -Message "Failed to load ActiveDirectory module or query users: $_" -Level "ERROR" -LogFile $LogFile
+        catch {
+            Write-Log -Message "Failed to load ActiveDirectory module or query users: $_" -Level "ERROR" -LogFile $LogFile
+        }
+    } else {
+        Write-Log -Message "Skipping domain user password rotation per user request." -Level "INFO" -LogFile $LogFile
     }
 
     # --- 1.5 KRBTGT Password Reset (Golden Ticket Mitigation) ---
@@ -141,38 +146,51 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     
     Write-Log -Message "Target Groups for Cleanup: $($groups -join ', ')" -Level "INFO" -LogFile $LogFile
 
-    # Get Built-in Administrator Name to exclude it even if renamed
-    $builtInAdminName = "Administrator"
-    try {
-        $domainSid = (Get-ADDomain).DomainSID.Value
-        $builtInAdmin = Get-ADUser -Identity "$domainSid-500" -ErrorAction SilentlyContinue
-        if ($builtInAdmin) {
-            $builtInAdminName = $builtInAdmin.SamAccountName
+    if ($groups.Count -gt 0) {
+        Write-Host "The following groups have been identified for member cleanup (all members except built-in Admin and Domain/Enterprise Admins will be removed):" -ForegroundColor Yellow
+        foreach ($g in $groups) {
+            Write-Host "  - $g" -ForegroundColor Cyan
         }
-    } catch {
-        Write-Log -Message "Could not determine built-in Administrator name by SID." -Level "WARNING" -LogFile $LogFile
-    }
-
-    foreach ($group in $groups) {
-        $excludedSamAccountNames = @("Administrator", "Domain Admins", "Enterprise Admins", $builtInAdminName) | Select-Object -Unique
-
-        try {
-            $members = Get-ADGroupMember -Identity $group -ErrorAction SilentlyContinue | Where-Object {
-                $excludedSamAccountNames -notcontains $_.SamAccountName
+        $confirmCleanup = Read-Host "Do you want to proceed with cleaning up these privileged groups? (Y/N)"
+        if ($confirmCleanup -eq "Y") {
+            # Get Built-in Administrator Name to exclude it even if renamed
+            $builtInAdminName = "Administrator"
+            try {
+                $domainSid = (Get-ADDomain).DomainSID.Value
+                $builtInAdmin = Get-ADUser -Identity "$domainSid-500" -ErrorAction SilentlyContinue
+                if ($builtInAdmin) {
+                    $builtInAdminName = $builtInAdmin.SamAccountName
+                }
+            } catch {
+                Write-Log -Message "Could not determine built-in Administrator name by SID." -Level "WARNING" -LogFile $LogFile
             }
 
-            foreach ($member in $members) {
+            foreach ($group in $groups) {
+                $excludedSamAccountNames = @("Administrator", "Domain Admins", "Enterprise Admins", $builtInAdminName) | Select-Object -Unique
+
                 try {
-                    Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false -ErrorAction Stop
-                    Write-Log -Message "Removed $($member.SamAccountName) from $group." -Level "SUCCESS" -LogFile $LogFile
-                }
-                catch {
-                    Write-Log -Message "Failed to remove group member $($member.SamAccountName) from $group. Reason: $_" -Level "ERROR" -LogFile $LogFile
+                    $members = Get-ADGroupMember -Identity $group -ErrorAction SilentlyContinue | Where-Object {
+                        $excludedSamAccountNames -notcontains $_.SamAccountName
+                    }
+
+                    foreach ($member in $members) {
+                        try {
+                            Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false -ErrorAction Stop
+                            Write-Log -Message "Removed $($member.SamAccountName) from $group." -Level "SUCCESS" -LogFile $LogFile
+                        }
+                        catch {
+                            Write-Log -Message "Failed to remove group member $($member.SamAccountName) from $group. Reason: $_" -Level "ERROR" -LogFile $LogFile
+                        }
+                    }
+                } catch {
+                    Write-Log -Message "Group $group not found or error accessing it." -Level "WARNING" -LogFile $LogFile
                 }
             }
-        } catch {
-            Write-Log -Message "Group $group not found or error accessing it." -Level "WARNING" -LogFile $LogFile
+        } else {
+            Write-Log -Message "Skipping privileged group member cleanup per user request." -Level "INFO" -LogFile $LogFile
         }
+    } else {
+        Write-Log -Message "No privileged groups identified for cleanup." -Level "INFO" -LogFile $LogFile
     }
 
     # --- 3. Kerberos Pre-authentication ---
