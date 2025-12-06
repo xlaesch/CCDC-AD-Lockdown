@@ -8,6 +8,9 @@ param(
 if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
     . "$PSScriptRoot/../functions/Write-Log.ps1"
 }
+if (-not (Get-Command Set-RegistryValue -ErrorAction SilentlyContinue)) {
+    . "$PSScriptRoot/../functions/Set-RegistryValue.ps1"
+}
 
 Write-Log -Message "Starting Service Hardening..." -Level "INFO" -LogFile $LogFile
 
@@ -109,4 +112,29 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
     } catch {
         Write-Log -Message "Failed to set LDAP limits: $_" -Level "ERROR" -LogFile $LogFile
     }
+}
+
+# --- 5. Remote Desktop Services (Ensure Enabled) ---
+Write-Log -Message "Ensuring Remote Desktop Services are enabled..." -Level "INFO" -LogFile $LogFile
+try {
+    # Enable RDP in Registry
+    Set-RegistryValue -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Type DWord
+    Write-Log -Message "RDP Connections allowed in Registry (fDenyTSConnections = 0)." -Level "SUCCESS" -LogFile $LogFile
+    
+    # Ensure Service is Running
+    $termService = Get-Service -Name "TermService" -ErrorAction SilentlyContinue
+    if ($termService) {
+        if ($termService.StartType -ne 'Automatic') {
+            Set-Service -Name "TermService" -StartupType Automatic
+            Write-Log -Message "Set TermService startup type to Automatic." -Level "SUCCESS" -LogFile $LogFile
+        }
+        if ($termService.Status -ne 'Running') {
+            Start-Service -Name "TermService"
+            Write-Log -Message "Started TermService." -Level "SUCCESS" -LogFile $LogFile
+        }
+    } else {
+        Write-Log -Message "TermService not found." -Level "WARNING" -LogFile $LogFile
+    }
+} catch {
+    Write-Log -Message "Failed to enable Remote Desktop Services: $_" -Level "ERROR" -LogFile $LogFile
 }
