@@ -167,8 +167,8 @@ if (Test-Path $ConfigFile) {
              Write-Log -Message "Configuration file is empty: $ConfigFile" -Level "WARNING" -LogFile $LogFile
         }
     } catch {
-         Write-Log -Message "Failed to load config from $ConfigFile: $_" -Level "ERROR" -LogFile $LogFile
-    }
+         Write-Log -Message "Failed to load config from ${ConfigFile}: $_" -Level "ERROR" -LogFile $LogFile
+     }
 } else {
     Write-Log -Message "Configuration file not found: $ConfigFile" -Level "WARNING" -LogFile $LogFile
 }
