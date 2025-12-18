@@ -101,7 +101,6 @@ Write-Log -Message "Running as SYSTEM. Proceeding with hardening..." -Level "INF
 
 # Define Available Modules
 $AvailableModules = @(
-    "00_GPO_Deployment.ps1",
     "01_Account_Policies.ps1",
     "02_Network_Security.ps1",
     "03_Service_Hardening.ps1",
