@@ -12,9 +12,55 @@ if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
 
 Write-Log -Message "Starting Firewall Hardening..." -Level "INFO" -LogFile $LogFile
 
+# Prompt for Trusted Network subnets and confirm before restricting
+function Get-TrustedNetworkSelection {
+    param(
+        [string]$LogFile
+    )
+
+    while ($true) {
+        $raw = Read-Host "Enter allowed subnets (comma-separated, e.g. 10.0.0.0/8,192.168.1.0/24) or press Enter for Any"
+
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            Write-Log -Message "No subnets provided. Using Any." -Level "INFO" -LogFile $LogFile
+            return @{
+                Addresses = $null
+                Label = "Any"
+            }
+        }
+
+        $rawTrim = $raw.Trim()
+        if ($rawTrim -match '^(?i)any$') {
+            Write-Log -Message "User selected Any for trusted network." -Level "INFO" -LogFile $LogFile
+            return @{
+                Addresses = $null
+                Label = "Any"
+            }
+        }
+
+        $entries = $rawTrim -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+        if (-not $entries -or $entries.Count -eq 0) {
+            Write-Host "No valid subnets entered. Please try again."
+            continue
+        }
+
+        Write-Host "Subnets entered: $($entries -join ', ')"
+        $confirm = Read-Host "Confirm these subnets? (Y/N)"
+        if ($confirm -match '^(?i)y(es)?$') {
+            return @{
+                Addresses = $entries
+                Label = ($entries -join ", ")
+            }
+        }
+
+        Write-Host "Subnets not confirmed. Please re-enter."
+    }
+}
+
 # Determine Trusted Network (default: Any)
-$TrustedNetwork = $null
-$TrustedNetworkLabel = "Any"
+$trustedSelection = Get-TrustedNetworkSelection -LogFile $LogFile
+$TrustedNetwork = $trustedSelection.Addresses
+$TrustedNetworkLabel = $trustedSelection.Label
 Write-Log -Message "Using Trusted Network: $TrustedNetworkLabel" -Level "INFO" -LogFile $LogFile
 
 # Helper function to add rule safely
@@ -69,7 +115,7 @@ Write-Log -Message "Applying Common Firewall Rules..." -Level "INFO" -LogFile $L
 Add-FirewallRule -DisplayName "Ping In" -Direction "Inbound" -Protocol "ICMPv4" -RemoteAddress $TrustedNetwork
 
 # RDP (TCP 3389)
-Add-FirewallRule -DisplayName "RDP In" -Direction "Inbound" -Protocol "TCP" -LocalPort "3389" -Service "TermService"
+Add-FirewallRule -DisplayName "RDP In" -Direction "Inbound" -Protocol "TCP" -LocalPort "3389" -RemoteAddress $TrustedNetwork -Service "TermService"
 
 # --- 3. Domain Controller Specific Rules ---
 Write-Log -Message "Applying Domain Controller Firewall Rules..." -Level "INFO" -LogFile $LogFile
