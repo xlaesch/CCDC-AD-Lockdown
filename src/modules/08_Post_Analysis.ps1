@@ -14,7 +14,6 @@ Write-Log -Message "Starting Post-Hardening Analysis..." -Level "INFO" -LogFile 
 
 # --- 1. Vulnerable Certificate Check (Certify.exe) ---
 $CertifyPath = "$PSScriptRoot/../../tools/certify.exe"
-if (-not (Test-Path $CertifyPath)) { $CertifyPath = "$PSScriptRoot/../../tools/Certify/Certify.exe" }
 
 if (Test-Path $CertifyPath) {
     try {
@@ -30,11 +29,7 @@ if (Test-Path $CertifyPath) {
 }
 
 # --- 2. PingCastle ---
-$PingCastlePath = "$PSScriptRoot/../../tools/PingCastle.exe"
-# Check if it might be in a subfolder
-if (-not (Test-Path $PingCastlePath)) {
-    $PingCastlePath = "$PSScriptRoot/../../tools/PingCastle/PingCastle.exe"
-}
+$PingCastlePath = Join-Path -Path $PSScriptRoot -ChildPath "..\\..\\tools\\PingCastle.exe"
 
 if (Test-Path $PingCastlePath) {
         Write-Log -Message "Found PingCastle at $PingCastlePath. Running health check..." -Level "INFO" -LogFile $LogFile
@@ -43,18 +38,24 @@ if (Test-Path $PingCastlePath) {
         # Adjust arguments as needed for the specific version/needs
         $ReportDir = "$PSScriptRoot/../../reports/PingCastle"
         if (-not (Test-Path $ReportDir)) { New-Item -ItemType Directory -Path $ReportDir -Force | Out-Null }
+
+        $PingCastlePath = (Resolve-Path -Path $PingCastlePath -ErrorAction Stop).Path
         
         # PingCastle usually generates an HTML report in the current directory or specified one
         # We'll run it and capture output
-        $proc = Start-Process -FilePath $PingCastlePath -ArgumentList "--healthcheck --server $env:COMPUTERNAME --no-prompt" -PassThru -Wait -WindowStyle Hidden
+        $proc = Start-Process -FilePath $PingCastlePath -ArgumentList "--healthcheck --server $env:COMPUTERNAME --no-prompt" -PassThru -Wait -WindowStyle Hidden -WorkingDirectory $ReportDir
         
         if ($proc.ExitCode -eq 0) {
             Write-Log -Message "PingCastle execution completed." -Level "INFO" -LogFile $LogFile
-            # Move reports if they are generated in the tools dir
-            $GeneratedReports = Get-ChildItem -Path (Split-Path $PingCastlePath) -Filter "*.html"
-            foreach ($report in $GeneratedReports) {
-                Move-Item -Path $report.FullName -Destination $ReportDir -Force
-                Write-Log -Message "Report moved to $ReportDir/$($report.Name)" -Level "INFO" -LogFile $LogFile
+            $GeneratedReports = Get-ChildItem -Path $ReportDir -Filter "*.html" -ErrorAction SilentlyContinue
+            if (-not $GeneratedReports) {
+                # Fall back to tools dir in case PingCastle writes reports next to the EXE.
+                $FallbackDir = Split-Path $PingCastlePath
+                $GeneratedReports = Get-ChildItem -Path $FallbackDir -Filter "*.html" -ErrorAction SilentlyContinue
+                foreach ($report in $GeneratedReports) {
+                    Move-Item -Path $report.FullName -Destination $ReportDir -Force
+                    Write-Log -Message "Report moved to $ReportDir/$($report.Name)" -Level "INFO" -LogFile $LogFile
+                }
             }
         } else {
             Write-Log -Message "PingCastle exited with code $($proc.ExitCode)." -Level "WARNING" -LogFile $LogFile
@@ -68,7 +69,6 @@ if (Test-Path $PingCastlePath) {
 
 # --- 3. BloodHound (SharpHound) ---
 $SharpHoundPath = "$PSScriptRoot/../../tools/SharpHound.exe"
-if (-not (Test-Path $SharpHoundPath)) { $SharpHoundPath = "$PSScriptRoot/../../tools/SharpHound/SharpHound.exe" }
 
 if (Test-Path $SharpHoundPath) {
     Write-Log -Message "Found SharpHound at $SharpHoundPath. Running collection..." -Level "INFO" -LogFile $LogFile
