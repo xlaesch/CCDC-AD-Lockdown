@@ -2,8 +2,7 @@
 # Handles User Passwords, Group Memberships, and Account Controls
 
 param(
-    [string]$LogFile,
-    $Config
+    [string]$LogFile
 )
 
 # Import helper functions if running standalone (optional check)

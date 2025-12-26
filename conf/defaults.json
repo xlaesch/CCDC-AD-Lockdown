@@ -1,7 +1,0 @@
-{
-    "TrustedNetwork": "Any",
-    "EnableFirewall": true,
-    "BlockOutboundScriptEngines": true,
-    "DisableSMBv1": true,
-    "EnableAuditing": true
-}

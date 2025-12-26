@@ -2,8 +2,7 @@
 # Handles manual and bulk domain user password rotation
 
 param(
-    [string]$LogFile,
-    $Config
+    [string]$LogFile
 )
 
 # Import helper functions if running standalone (optional check)

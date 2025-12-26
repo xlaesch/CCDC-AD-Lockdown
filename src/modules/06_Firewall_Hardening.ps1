@@ -3,8 +3,7 @@
 # Based on legacy dcFirewall.bat and GPFirewalls.ps1
 
 param(
-    [string]$LogFile,
-    $Config
+    [string]$LogFile
 )
 
 if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
@@ -13,13 +12,9 @@ if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
 
 Write-Log -Message "Starting Firewall Hardening..." -Level "INFO" -LogFile $LogFile
 
-# Determine Trusted Network
+# Determine Trusted Network (default: Any)
 $TrustedNetwork = $null
 $TrustedNetworkLabel = "Any"
-if ($Config -and $Config.TrustedNetwork) {
-    $TrustedNetwork = $Config.TrustedNetwork
-    $TrustedNetworkLabel = $TrustedNetwork
-}
 Write-Log -Message "Using Trusted Network: $TrustedNetworkLabel" -Level "INFO" -LogFile $LogFile
 
 # Helper function to add rule safely
@@ -70,7 +65,7 @@ Write-Log -Message "Assuming Role: $role" -Level "INFO" -LogFile $LogFile
 Write-Log -Message "Applying Common Firewall Rules..." -Level "INFO" -LogFile $LogFile
 
 # Ping (ICMPv4) - Restricted to internal subnet example (10.120.0.0/16 from legacy)
-# Default is unrestricted unless Config.TrustedNetwork is set
+# Default is unrestricted (Any)
 Add-FirewallRule -DisplayName "Ping In" -Direction "Inbound" -Protocol "ICMPv4" -RemoteAddress $TrustedNetwork
 
 # RDP (TCP 3389)

@@ -3,12 +3,9 @@
     AD Hardening Controller Script
 .DESCRIPTION
     Orchestrates the execution of hardening modules for Active Directory environments.
-.PARAMETER ConfigFile
-    Path to the configuration file (default: conf/defaults.json)
 #>
 
 param (
-    [string]$ConfigFile = "conf/defaults.json",
     [string[]]$IncludeModule,
     [switch]$All,
     [Alias("debug")]
@@ -213,7 +210,6 @@ if (-not $IsSystem) {
     # Reconstruct arguments
     $ScriptPath = $PSCommandPath
     $ArgsString = ""
-    if ($ConfigFile -ne "conf/defaults.json") { $ArgsString += " -ConfigFile `"$ConfigFile`"" }
     if ($All) { $ArgsString += " -All" }
     if ($IncludeModule) { 
          $modules = $IncludeModule -join ","
@@ -293,30 +289,12 @@ if ($ModulesToExecute.Count -eq 0) {
     exit
 }
 
-# Load Configuration
-$ConfigObj = @{}
-if (Test-Path $ConfigFile) {
-    try {
-        $JsonContent = Get-Content -Raw $ConfigFile
-        if (-not [string]::IsNullOrWhiteSpace($JsonContent)) {
-            $ConfigObj = $JsonContent | ConvertFrom-Json
-            Write-Log -Message "Configuration loaded from $ConfigFile" -Level "INFO" -LogFile $LogFile
-        } else {
-             Write-Log -Message "Configuration file is empty: $ConfigFile" -Level "WARNING" -LogFile $LogFile
-        }
-    } catch {
-         Write-Log -Message "Failed to load config from ${ConfigFile}: $_" -Level "ERROR" -LogFile $LogFile
-     }
-} else {
-    Write-Log -Message "Configuration file not found: $ConfigFile" -Level "WARNING" -LogFile $LogFile
-}
-
 foreach ($Module in $ModulesToExecute) {
     $ModulePath = "$ScriptRoot/src/modules/$Module"
     if (Test-Path $ModulePath) {
         Write-Log -Message "Executing module: $Module" -Level "INFO" -LogFile $LogFile
         try {
-            & $ModulePath -LogFile $LogFile -Config $ConfigObj
+            & $ModulePath -LogFile $LogFile
         }
         catch {
             Write-Log -Message "Error executing module $Module : $_" -Level "ERROR" -LogFile $LogFile

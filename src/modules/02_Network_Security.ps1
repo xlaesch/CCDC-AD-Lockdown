@@ -2,8 +2,7 @@
 # Handles Network level hardening for AD (Firewall, Zerologon)
 
 param(
-    [string]$LogFile,
-    $Config
+    [string]$LogFile
 )
 
 if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
