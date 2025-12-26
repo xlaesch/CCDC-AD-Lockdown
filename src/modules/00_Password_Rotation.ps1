@@ -14,7 +14,7 @@ if (-not (Get-Command New-RandomPassword -ErrorAction SilentlyContinue)) {
     . "$PSScriptRoot/../functions/New-RandomPassword.ps1"
 }
 if (-not (Get-Command Select-ArrowMenu -ErrorAction SilentlyContinue)) {
-    . "$PSScriptRoot/../functions/Select-ArrowMenu.ps1"
+    throw "Select-ArrowMenu is not loaded. Run Start-Hardening.ps1 or load the function before running this module."
 }
 
 Write-Log -Message "Starting Password Rotation..." -Level "INFO" -LogFile $LogFile

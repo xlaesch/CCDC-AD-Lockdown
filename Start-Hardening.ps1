@@ -28,8 +28,107 @@ if (-not (Test-Path $LogDir)) {
 . "$ScriptRoot/src/functions/Write-Log.ps1"
 . "$ScriptRoot/src/functions/Set-RegistryValue.ps1"
 . "$ScriptRoot/src/functions/New-RandomPassword.ps1"
-. "$ScriptRoot/src/functions/Install-Sysinternals.ps1"
-. "$ScriptRoot/src/functions/Select-ArrowMenu.ps1"
+
+function Install-Sysinternals {
+    param (
+        [string]$DestinationPath = "C:\Sysinternals",
+        [string]$SourceZipPath = (Join-Path $PSScriptRoot "tools.zip"),
+        [string]$LogFile
+    )
+
+    if (-not (Test-Path $DestinationPath)) {
+        New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+    }
+
+    # Check if PsExec exists to avoid overwriting in use files or redundant downloads
+    if (Test-Path (Join-Path $DestinationPath "PsExec.exe")) {
+        if ($LogFile) { Write-Log -Message "Sysinternals (PsExec) already installed at $DestinationPath. Skipping download." -Level "INFO" -LogFile $LogFile }
+        return
+    }
+
+    try {
+        if (-not (Test-Path $SourceZipPath)) {
+            if ($LogFile) { Write-Log -Message "Sysinternals bundle not found at $SourceZipPath. Skipping install." -Level "WARNING" -LogFile $LogFile }
+            return
+        }
+
+        if ($LogFile) { Write-Log -Message "Extracting Sysinternals bundle from $SourceZipPath..." -Level "INFO" -LogFile $LogFile }
+        Expand-Archive -Path $SourceZipPath -DestinationPath $DestinationPath -Force
+        if ($LogFile) { Write-Log -Message "Sysinternals bundle extracted successfully." -Level "INFO" -LogFile $LogFile }
+    }
+    catch {
+        if ($LogFile) { Write-Log -Message "Failed to install PSTools: $_" -Level "ERROR" -LogFile $LogFile }
+        throw $_
+    }
+}
+
+function Select-ArrowMenu {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Title,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Options,
+        [switch]$MultiSelect,
+        [switch]$AllowSelectAll
+    )
+
+    if (-not $Options -or $Options.Count -eq 0) {
+        return @()
+    }
+
+    Write-Host $Title -ForegroundColor Cyan
+    for ($i = 0; $i -lt $Options.Count; $i++) {
+        Write-Host "[$($i + 1)] $($Options[$i])"
+    }
+
+    if ($MultiSelect) {
+        $prompt = "Selection (comma-separated numbers"
+        if ($AllowSelectAll) {
+            $prompt += " or 'all'"
+        }
+        $prompt += ", 'q' to cancel)"
+
+        while ($true) {
+            $selection = Read-Host $prompt
+            if ($selection -match '^\s*(q|quit|exit)\s*$') {
+                return @()
+            }
+            if ($AllowSelectAll -and $selection -match '^\s*all\s*$') {
+                return $Options
+            }
+
+            $indices = $selection -split "[,\\s]+" |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ -match '^\d+$' } |
+                ForEach-Object { [int]$_ - 1 } |
+                Where-Object { $_ -ge 0 -and $_ -lt $Options.Count } |
+                Sort-Object -Unique
+
+            if ($indices.Count -gt 0) {
+                return $indices | ForEach-Object { $Options[$_] }
+            }
+
+            Write-Warning "Invalid selection. Enter numbers from 1 to $($Options.Count)."
+        }
+    }
+
+    $prompt = "Selection (number, 'q' to cancel)"
+    while ($true) {
+        $selection = Read-Host $prompt
+        if ($selection -match '^\s*(q|quit|exit)\s*$') {
+            return $null
+        }
+        if ($selection -match '^\d+$') {
+            $index = [int]$selection - 1
+            if ($index -ge 0 -and $index -lt $Options.Count) {
+                return $Options[$index]
+            }
+        }
+
+        Write-Warning "Invalid selection. Enter a number from 1 to $($Options.Count)."
+    }
+}
 
 Write-Log -Message "=== Starting AD Hardening Process ===" -Level "INFO" -LogFile $LogFile
 
