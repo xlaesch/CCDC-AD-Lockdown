@@ -32,33 +32,70 @@ if (Test-Path $CertifyPath) {
 $PingCastlePath = Join-Path -Path $PSScriptRoot -ChildPath "..\\..\\tools\\PingCastle.exe"
 
 if (Test-Path $PingCastlePath) {
-        Write-Log -Message "Found PingCastle at $PingCastlePath. Running health check..." -Level "INFO" -LogFile $LogFile
+    Write-Log -Message "Found PingCastle at $PingCastlePath. Running health check..." -Level "INFO" -LogFile $LogFile
     try {
-        # Run PingCastle with --healthcheck (default) and --no-prompt
+        # Run PingCastle with --healthcheck (default)
         # Adjust arguments as needed for the specific version/needs
-        $ReportDir = "$PSScriptRoot/../../reports/PingCastle"
+        $ReportDir = Join-Path -Path $PSScriptRoot -ChildPath "..\\..\\reports\\PingCastle"
         if (-not (Test-Path $ReportDir)) { New-Item -ItemType Directory -Path $ReportDir -Force | Out-Null }
+        $ReportDir = (Resolve-Path -Path $ReportDir -ErrorAction Stop).Path
 
         $PingCastlePath = (Resolve-Path -Path $PingCastlePath -ErrorAction Stop).Path
-        
-        # PingCastle usually generates an HTML report in the current directory or specified one
-        # We'll run it and capture output
-        $proc = Start-Process -FilePath $PingCastlePath -ArgumentList "--healthcheck --server $env:COMPUTERNAME --no-prompt" -PassThru -Wait -WindowStyle Hidden -WorkingDirectory $ReportDir
-        
-        if ($proc.ExitCode -eq 0) {
+
+        $Arguments = @("--healthcheck")
+        if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) {
+            $Arguments += @("--server", $env:COMPUTERNAME)
+        }
+
+        # PingCastle usually generates reports in the current directory.
+        $OriginalDir = (Get-Location).Path
+        Push-Location -Path $ReportDir
+        try {
+            $Output = & $PingCastlePath @Arguments 2>&1
+            $ExitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+
+        if ($ExitCode -eq 0) {
             Write-Log -Message "PingCastle execution completed." -Level "INFO" -LogFile $LogFile
-            $GeneratedReports = Get-ChildItem -Path $ReportDir -Filter "*.html" -ErrorAction SilentlyContinue
+            $ReportExtensions = @(".html", ".htm", ".xml")
+            $GeneratedReports = Get-ChildItem -Path $ReportDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $ReportExtensions -contains $_.Extension.ToLowerInvariant() }
             if (-not $GeneratedReports) {
                 # Fall back to tools dir in case PingCastle writes reports next to the EXE.
-                $FallbackDir = Split-Path $PingCastlePath
-                $GeneratedReports = Get-ChildItem -Path $FallbackDir -Filter "*.html" -ErrorAction SilentlyContinue
-                foreach ($report in $GeneratedReports) {
-                    Move-Item -Path $report.FullName -Destination $ReportDir -Force
-                    Write-Log -Message "Report moved to $ReportDir/$($report.Name)" -Level "INFO" -LogFile $LogFile
+                $FallbackDirs = @(
+                    (Split-Path -Parent $PingCastlePath),
+                    $OriginalDir
+                ) | Select-Object -Unique
+
+                foreach ($FallbackDir in $FallbackDirs) {
+                    if (-not (Test-Path $FallbackDir)) { continue }
+                    $FallbackReports = Get-ChildItem -Path $FallbackDir -File -ErrorAction SilentlyContinue |
+                        Where-Object { $ReportExtensions -contains $_.Extension.ToLowerInvariant() }
+                    foreach ($report in $FallbackReports) {
+                        Move-Item -Path $report.FullName -Destination $ReportDir -Force
+                        Write-Log -Message "Report moved to $ReportDir/$($report.Name)" -Level "INFO" -LogFile $LogFile
+                    }
                 }
+
+                $GeneratedReports = Get-ChildItem -Path $ReportDir -File -ErrorAction SilentlyContinue |
+                    Where-Object { $ReportExtensions -contains $_.Extension.ToLowerInvariant() }
+            }
+
+            if (-not $GeneratedReports) {
+                $OutputText = $Output | Out-String
+                if (-not [string]::IsNullOrWhiteSpace($OutputText)) {
+                    Write-Log -Message "PingCastle Output:`n$OutputText" -Level "WARNING" -LogFile $LogFile
+                }
+                Write-Log -Message "PingCastle completed but no reports were found in $ReportDir." -Level "WARNING" -LogFile $LogFile
             }
         } else {
-            Write-Log -Message "PingCastle exited with code $($proc.ExitCode)." -Level "WARNING" -LogFile $LogFile
+            Write-Log -Message "PingCastle exited with code $ExitCode." -Level "WARNING" -LogFile $LogFile
+            $OutputText = $Output | Out-String
+            if (-not [string]::IsNullOrWhiteSpace($OutputText)) {
+                Write-Log -Message "PingCastle Output:`n$OutputText" -Level "WARNING" -LogFile $LogFile
+            }
         }
     } catch {
         Write-Log -Message "Failed to run PingCastle: $_" -Level "ERROR" -LogFile $LogFile
