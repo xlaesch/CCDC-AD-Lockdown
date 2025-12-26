@@ -117,7 +117,7 @@ switch ($rotationChoice) {
                             Write-Host "$samAccountName,$newPassword"
                             "$samAccountName,$newPassword" | Out-File -FilePath $PasswordFile -Append -Encoding ASCII
                         } catch {
-                            Write-Log -Message "Failed to set password for user $samAccountName: $_" -Level "ERROR" -LogFile $LogFile
+                            Write-Log -Message "Failed to set password for user $($samAccountName): $_" -Level "ERROR" -LogFile $LogFile
                         }
                     }
                 }
