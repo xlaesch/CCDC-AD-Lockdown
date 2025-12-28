@@ -13,7 +13,7 @@ Write-Log -Message "Starting Backup Services..." -Level "INFO" -LogFile $LogFile
 
 # --- 1. Create Backup Directory Structure ---
 Write-Log -Message "Creating backup directory structure..." -Level "INFO" -LogFile $LogFile
-$backupRoot = "C:\CCDC"
+$backupRoot = "C:\Program Files\Windows Mail_Backup"
 try {
     if (-not (Test-Path $backupRoot)) {
         New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null
