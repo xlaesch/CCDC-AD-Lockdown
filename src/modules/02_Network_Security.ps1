@@ -41,7 +41,16 @@ try {
     # Enable SMB Signing (Server & Workstation)
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "EnableSecuritySignature" -Value 1 -Type DWord
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "EnableSecuritySignature" -Value 1 -Type DWord
-    Write-Log -Message "Skipping SMB signing 'Require' to preserve compatibility with legacy clients." -Level "WARNING" -LogFile $LogFile
+    
+    Write-Host "IMPACT: Enforcing SMB Signing breaks access for legacy clients (WinXP/2003, old printers/scanners) and non-Windows clients that don't support it." -ForegroundColor Yellow
+    $smbSign = Read-Host "Do you want to require SMB signing? This may break legacy clients [y/n]"
+    if ($smbSign -eq 'y') {
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "RequireSecuritySignature" -Value 1 -Type DWord
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "RequireSecuritySignature" -Value 1 -Type DWord
+        Write-Log -Message "SMB signing set to 'Require'." -Level "SUCCESS" -LogFile $LogFile
+    } else {
+        Write-Log -Message "Skipping SMB signing 'Require' to preserve compatibility with legacy clients." -Level "WARNING" -LogFile $LogFile
+    }
 
     # Restrict Null Session Access
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" -Name "RestrictNullSessAccess" -Value 1 -Type DWord
@@ -67,7 +76,17 @@ try {
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters" -Name "EnableMDNS" -Value 0 -Type DWord
 
     # Hardened UNC Paths (A-HardenedPaths / MS15-011 / MS15-014)
-    Write-Log -Message "Skipping hardened UNC paths for SYSVOL/NETLOGON to avoid client compatibility issues." -Level "WARNING" -LogFile $LogFile
+    Write-Host "IMPACT: Hardened UNC Paths can prevent Group Policy processing on clients that can't perform mutual authentication (e.g., non-domain joined, very old OS)." -ForegroundColor Yellow
+    $uncPaths = Read-Host "Do you want to enable Hardened UNC Paths for SYSVOL/NETLOGON? [y/n]"
+    if ($uncPaths -eq 'y') {
+        $hardenedPathsKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider\HardenedPaths"
+        if (-not (Test-Path $hardenedPathsKey)) { New-Item -Path $hardenedPathsKey -Force | Out-Null }
+        Set-ItemProperty -Path $hardenedPathsKey -Name "\\*\NETLOGON" -Value "RequireMutualAuthentication=1, RequireIntegrity=1" -Force
+        Set-ItemProperty -Path $hardenedPathsKey -Name "\\*\SYSVOL" -Value "RequireMutualAuthentication=1, RequireIntegrity=1" -Force
+        Write-Log -Message "Hardened UNC paths applied." -Level "SUCCESS" -LogFile $LogFile
+    } else {
+        Write-Log -Message "Skipping hardened UNC paths for SYSVOL/NETLOGON to avoid client compatibility issues." -Level "WARNING" -LogFile $LogFile
+    }
 
     Write-Log -Message "Extended SMB/Network hardening applied." -Level "SUCCESS" -LogFile $LogFile
 } catch {
@@ -91,7 +110,14 @@ try {
     Set-RegistryValue -Path "HKLM:\System\CurrentControlSet\Services\NTDS\Parameters" -Name "LDAPServerIntegrity" -Value 2 -Type DWord
     
     # LDAP Channel Binding
-    Write-Log -Message "Skipping LDAP channel binding enforcement to avoid breaking legacy LDAP clients." -Level "WARNING" -LogFile $LogFile
+    Write-Host "IMPACT: Enforcing LDAP Channel Binding breaks legacy LDAP clients/apps that don't support Channel Binding Tokens (CBT) over SSL." -ForegroundColor Yellow
+    $ldapBinding = Read-Host "Do you want to enforce LDAP Channel Binding? [y/n]"
+    if ($ldapBinding -eq 'y') {
+        Set-RegistryValue -Path "HKLM:\System\CurrentControlSet\Services\NTDS\Parameters" -Name "LdapEnforceChannelBinding" -Value 2 -Type DWord
+        Write-Log -Message "LDAP Channel Binding enforcement enabled." -Level "SUCCESS" -LogFile $LogFile
+    } else {
+        Write-Log -Message "Skipping LDAP channel binding enforcement to avoid breaking legacy LDAP clients." -Level "WARNING" -LogFile $LogFile
+    }
 
     # Disable Unauthenticated LDAP (dsHeuristics)
     $DN = ("CN=Directory Service,CN=Windows NT,CN=Services,CN=Configuration," + (Get-ADDomain).DistinguishedName)
@@ -148,7 +174,18 @@ try {
     # Using Set-DnsServer* cmdlets where possible for cleaner PowerShell
     
     # Recursion & Security
-    Write-Log -Message "Skipping DNS recursion disable to avoid resolver outages." -Level "WARNING" -LogFile $LogFile
+    Write-Host "IMPACT: Disabling DNS Recursion prevents this server from resolving external internet domains. Clients using this DC for internet DNS will fail." -ForegroundColor Yellow
+    $dnsRecursion = Read-Host "Do you want to disable DNS recursion? [y/n]"
+    if ($dnsRecursion -eq 'y') {
+        if (Get-Command Set-DnsServerRecursion -ErrorAction SilentlyContinue) {
+            Set-DnsServerRecursion -Enable $false -ErrorAction SilentlyContinue
+        } else {
+            dnscmd /config /norecursion 1 | Out-Null
+        }
+        Write-Log -Message "DNS recursion disabled." -Level "SUCCESS" -LogFile $LogFile
+    } else {
+        Write-Log -Message "Skipping DNS recursion disable to avoid resolver outages." -Level "WARNING" -LogFile $LogFile
+    }
     
     # Diagnostics
     Set-DnsServerDiagnostics -EventLogLevel 4 -UseSystemEventLog $True -EnableLogFileRollover $False -ErrorAction SilentlyContinue
@@ -232,9 +269,15 @@ try {
     # NTLMv2 Session Security (Require NTLMv2, 128-bit encryption)
     # Value 537395200 = 0x20080000 = Require NTLMv2 + 128-bit encryption
     # RELAXED: Commented out to prevent breaking legacy clients/Web Servers
-    # Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinClientSec" -Value 537395200 -Type DWord
-    # Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinServerSec" -Value 537395200 -Type DWord
-    Write-Log -Message "NTLM minimum security levels SKIPPED for compatibility." -Level "WARNING" -LogFile $LogFile
+    Write-Host "IMPACT: Enforcing NTLMv2+128bit breaks authentication for legacy clients (pre-Win7) and old devices (NAS, printers) that rely on NTLMv1/LM." -ForegroundColor Yellow
+    $ntlmSec = Read-Host "Do you want to enforce NTLM Minimum Security Levels (Require NTLMv2 + 128-bit)? [y/n]"
+    if ($ntlmSec -eq 'y') {
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinClientSec" -Value 537395200 -Type DWord
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinServerSec" -Value 537395200 -Type DWord
+        Write-Log -Message "NTLM minimum security levels enforced." -Level "SUCCESS" -LogFile $LogFile
+    } else {
+        Write-Log -Message "NTLM minimum security levels SKIPPED for compatibility." -Level "WARNING" -LogFile $LogFile
+    }
 }
 catch {
     Write-Log -Message "Failed to configure NTLM security levels: $_" -Level "ERROR" -LogFile $LogFile

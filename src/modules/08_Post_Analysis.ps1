@@ -148,5 +148,33 @@ if (Test-Path $SharpHoundPath) {
     Write-Log -Message "SharpHound not found. Skipping." -Level "WARNING" -LogFile $LogFile
 }
 
+# --- 4. HardenAD ---
+$ToolsDir = Join-Path -Path $PSScriptRoot -ChildPath "../../tools"
+if (-not (Test-Path $ToolsDir)) {
+    New-Item -ItemType Directory -Path $ToolsDir -Force | Out-Null
+}
+
+$HardenADDir = Join-Path -Path $ToolsDir -ChildPath "HardenAD"
+$HardenADScript = Join-Path -Path $HardenADDir -ChildPath "HardenAD.ps1"
+
+if (-not (Test-Path $HardenADDir)) {
+    Write-Log -Message "HardenAD not found in $HardenADDir. Cloning from GitHub..." -Level "INFO" -LogFile $LogFile
+    try {
+        git clone https://github.com/LoicVeirman/HardenAD.git $HardenADDir 2>&1 | Out-Null
+    } catch {
+        Write-Log -Message "Git clone failed: $_" -Level "ERROR" -LogFile $LogFile
+    }
+    
+    if (-not (Test-Path $HardenADDir)) {
+         Write-Log -Message "Failed to clone HardenAD. Please ensure git is installed and internet is accessible." -Level "ERROR" -LogFile $LogFile
+    }
+}
+
+if (Test-Path $HardenADScript) {
+    Write-Log -Message "HardenAD is available at $HardenADScript. Skipping execution." -Level "INFO" -LogFile $LogFile
+} else {
+    Write-Log -Message "HardenAD script not found at $HardenADScript." -Level "WARNING" -LogFile $LogFile
+}
+
 Write-Log -Message "Post-Hardening Analysis Complete." -Level "INFO" -LogFile $LogFile
 

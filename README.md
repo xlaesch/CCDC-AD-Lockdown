@@ -66,18 +66,18 @@ Status legend: APPLIED, CONDITIONAL, INTERACTIVE, AUDIT-ONLY, SKIPPED.
 | SMBv1 enabled | Wormable exploits and remote code execution | [APPLIED] Disable SMBv1 via `Set-SmbServerConfiguration` or registry. |
 | SMB compression vulnerabilities | Remote code execution (SMBGhost) | [APPLIED] Set `DisableCompression=1`. |
 | SMB signing disabled | MITM or SMB relay | [APPLIED] Set `EnableSecuritySignature=1` on server and workstation. |
-| SMB signing not required | MITM or SMB relay risk remains | [SKIPPED] Require SMB signing is not enforced for legacy compatibility. |
+| SMB signing not required | MITM or SMB relay risk remains | [INTERACTIVE] Prompt to require SMB signing (Impact: breaks legacy clients). |
 | Null session access | Anonymous enumeration and access | [APPLIED] Set `RestrictNullSessAccess=1` and clear `NullSessionPipes` and `NullSessionShares`. |
 | Auto-created admin shares | Remote admin abuse | [APPLIED] Set `AutoShareServer=0` and `AutoShareWks=0`. |
 | LLMNR poisoning | Credential theft | [APPLIED] Disable LLMNR via `EnableMulticast=0`. |
 | NetBIOS over TCP/IP | Name poisoning and spoofing | [APPLIED] Set `NetbiosOptions=2` on all NetBT interfaces. |
 | mDNS spoofing | Name poisoning and MITM | [APPLIED] Set `EnableMDNS=0`. |
-| Unhardened UNC paths for SYSVOL and NETLOGON | MITM against SYSVOL or NETLOGON access | [SKIPPED] Hardened UNC paths are skipped for compatibility. |
+| Unhardened UNC paths for SYSVOL and NETLOGON | MITM against SYSVOL or NETLOGON access | [INTERACTIVE] Prompt to enable Hardened UNC paths (Impact: GPO processing issues on legacy clients). |
 | LDAP client signing disabled | MITM and credential relay | [APPLIED] Set `LDAPClientIntegrity=2`. |
 | Weak NTLM compatibility | Downgrade to weaker auth | [APPLIED] Set `LmCompatibilityLevel=3` (relaxed for legacy). |
 | Weak Kerberos encryption types | Cipher downgrade | [APPLIED] Set `SupportedEncryptionTypes=2147483644` (AES + RC4). |
 | LDAP server signing disabled | MITM and credential relay | [APPLIED] Set `LDAPServerIntegrity=2`. |
-| LDAP channel binding not enforced | NTLM relay to LDAP | [SKIPPED] LDAP channel binding enforcement is skipped. |
+| LDAP channel binding not enforced | NTLM relay to LDAP | [INTERACTIVE] Prompt to enforce LDAP channel binding (Impact: breaks legacy LDAP apps). |
 | Anonymous LDAP allowed | Directory enumeration | [APPLIED] Set dsHeuristics to disable anonymous LDAP. |
 | SIGRed DNS vulnerability | Remote code execution | [APPLIED] Set `TcpReceivePacketSize=0xFF00`. |
 | DNS global query block list disabled | WPAD and ISATAP abuse | [APPLIED] Enable global query block list via `dnscmd`. |
@@ -86,7 +86,7 @@ Status legend: APPLIED, CONDITIONAL, INTERACTIVE, AUDIT-ONLY, SKIPPED.
 | DNS cache poisoning | Cache poisoning | [APPLIED] Set cache locking to 100 percent. |
 | Smart name resolution abuse | Name spoofing | [APPLIED] Set `DisableSmartNameResolution=1`. |
 | Parallel A/AAAA query races | DNS spoofing | [APPLIED] Set `DisableParallelAandAAAA=1`. |
-| DNS recursion open | Abuse as open resolver | [SKIPPED] DNS recursion disable is skipped to avoid outages. |
+| DNS recursion open | Abuse as open resolver | [INTERACTIVE] Prompt to disable DNS recursion (Impact: breaks external resolution). |
 | Limited DNS visibility | Undetected DNS abuse | [APPLIED] Enable DNS diagnostics logging. |
 | DNS cache pollution | Cache poisoning | [APPLIED] Set MaxTtl, MaxNegativeTtl, and PollutionProtection. |
 | Insecure dynamic updates or zone transfers | Zone tampering or data exfiltration | [APPLIED] Enforce secure updates and restrict zone transfers per zone. |
@@ -96,7 +96,7 @@ Status legend: APPLIED, CONDITIONAL, INTERACTIVE, AUDIT-ONLY, SKIPPED.
 | Zerologon | Domain takeover | [APPLIED] Set `FullSecureChannelProtection=1`. |
 | Vulnerable channel allowlist | Zerologon bypass | [APPLIED] Remove `vulnerablechannelallowlist` if present. |
 | Weak Netlogon secure channel | Secure channel tampering | [APPLIED] Set `RequireSignOrSeal=1`, `SealSecureChannel=1`, `SignSecureChannel=1`, `RequireStrongKey=1`. |
-| Weak NTLM session security | MITM and weak encryption | [SKIPPED] `NTLMMinClientSec` and `NTLMMinServerSec` are not enforced. |
+| Weak NTLM session security | MITM and weak encryption | [INTERACTIVE] Prompt to enforce NTLMv2+128bit (Impact: breaks legacy NTLM clients). |
 | Anonymous SAM enumeration | Information disclosure | [APPLIED] Set `RestrictAnonymousSAM=1` with `RestrictAnonymous=0` and `EveryoneIncludesAnonymous=1` (relaxed for compatibility). |
 | Default admin shares | Remote admin abuse | [APPLIED] Set `NoDefaultAdminShares=1`. |
 | Stored domain credentials | Pass-the-hash reuse | [APPLIED] Set `DisableDomainCreds=1`. |
@@ -153,8 +153,8 @@ Status legend: APPLIED, CONDITIONAL, INTERACTIVE, AUDIT-ONLY, SKIPPED.
 | Vulnerability addressed | What the vuln can lead to | The control mitigating it |
 | --- | --- | --- |
 | Missing ADCS management tools | Inability to audit or manage CA securely | [CONDITIONAL] Install Adcs-Cert-Authority management tools if missing. |
-| Unmanaged or absent internal PKI baseline | Inconsistent certificate issuance | [SKIPPED] Automatic Enterprise Root CA installation is commented out. |
-| Changes requiring NTDS restart | Inconsistent state if restart is required | [SKIPPED] NTDS restart is skipped to avoid downtime. |
+| Unmanaged or absent internal PKI baseline | Inconsistent certificate issuance | [INTERACTIVE] Prompt to install Enterprise Root CA (Impact: major infrastructure change). |
+| Changes requiring NTDS restart | Inconsistent state if restart is required | [INTERACTIVE] Prompt to restart NTDS service (Impact: DC downtime). |
 | Misissued or compromised certificates | Impersonation and privilege escalation | [CONDITIONAL] If a CA exists, list issued certificates and prompt for mass revocation. |
 | Compromised certificates remain valid | Continued misuse of issued certs | [INTERACTIVE] Revoke all issued certificates and publish a new CRL when confirmed. |
 | No CA present | No certificate audit performed | [CONDITIONAL] Certificate auditing is skipped if no CA is found. |
@@ -200,3 +200,4 @@ Status legend: APPLIED, CONDITIONAL, INTERACTIVE, AUDIT-ONLY, SKIPPED.
 | Vulnerable certificate templates | Privilege escalation via ADCS | [CONDITIONAL] Run `Certify.exe find /vulnerable` if present; skipped if not found. |
 | AD security weaknesses not assessed | Undetected misconfigurations | [CONDITIONAL] Run PingCastle healthcheck if present; skipped if not found. |
 | Unknown AD attack paths | Undetected lateral movement paths | [CONDITIONAL] Run SharpHound `-c All` if present; skipped if not found. |
+| HardenAD baseline not applied | Missing rigorous security baseline | [INTERACTIVE] Prompt to run HardenAD if present (Impact: potential overlap/breakage). |

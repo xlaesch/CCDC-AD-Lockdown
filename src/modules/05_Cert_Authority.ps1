@@ -43,7 +43,14 @@ try {
             # However, to follow the user's legacy script intent:
             Write-Log -Message "CA Tools installed but no CA found. Attempting to install Enterprise Root CA (per legacy script)..." -Level "WARNING" -LogFile $LogFile
             # Install-AdcsCertificationAuthority -CAtype EnterpriseRootCA -Force
-            Write-Log -Message "Skipped automatic CA installation for safety. Uncomment in script to enable." -Level "WARNING" -LogFile $LogFile
+            Write-Host "IMPACT: Installing an Enterprise Root CA is a major infrastructure change. It introduces significant new attack surfaces (ADCS abuse) if not strictly managed." -ForegroundColor Yellow
+            $installCA = Read-Host "Do you want to install Enterprise Root CA? [y/n]"
+            if ($installCA -eq 'y') {
+                Install-AdcsCertificationAuthority -CAtype EnterpriseRootCA -Force
+                Write-Log -Message "Enterprise Root CA installed." -Level "SUCCESS" -LogFile $LogFile
+            } else {
+                Write-Log -Message "Skipped automatic CA installation for safety." -Level "WARNING" -LogFile $LogFile
+            }
         }
     }
 } catch {
@@ -52,8 +59,14 @@ try {
 
 # --- 3. Restart NTDS (Aggressive!) ---
 # The legacy script restarts NTDS. This is very disruptive on a DC.
-# We will skip this unless absolutely necessary, or log it.
-Write-Log -Message "Legacy script requested NTDS restart. Skipping for safety to prevent DC downtime." -Level "WARNING" -LogFile $LogFile
+Write-Host "IMPACT: Restarting NTDS stops all authentication and directory services on this DC temporarily. If this is the only DC, the domain will go offline." -ForegroundColor Yellow
+$restartNTDS = Read-Host "Do you want to restart NTDS service? This will cause DC downtime! [y/n]"
+if ($restartNTDS -eq 'y') {
+    Restart-Service -Name ntds -Force
+    Write-Log -Message "NTDS service restarted." -Level "SUCCESS" -LogFile $LogFile
+} else {
+    Write-Log -Message "Legacy script requested NTDS restart. Skipping for safety to prevent DC downtime." -Level "WARNING" -LogFile $LogFile
+}
 
 # --- 4. Audit and Revoke Certificates ---
 Write-Log -Message "Auditing Issued Certificates..." -Level "INFO" -LogFile $LogFile
