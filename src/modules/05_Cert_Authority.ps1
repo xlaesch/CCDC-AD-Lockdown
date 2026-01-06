@@ -16,6 +16,13 @@ Write-Log -Message "Verifying ADCS Management Tools..." -Level "INFO" -LogFile $
 try {
     $feature = Get-WindowsFeature -Name Adcs-Cert-Authority
     if (-not $feature.Installed) {
+        $installAdcs = Read-Host "ADCS Role is not installed. Do you want to install and harden ADCS? This is required for Locksmith. [y/n]"
+        if ($installAdcs -ne 'y') {
+            Write-Log -Message "User chose not to install ADCS. Skipping ADCS hardening and Locksmith." -Level "WARNING" -LogFile $LogFile
+            $Global:SkipLocksmith = $true
+            return
+        }
+
         Write-Log -Message "Installing ADCS Management Tools..." -Level "INFO" -LogFile $LogFile
         Add-WindowsFeature Adcs-Cert-Authority -IncludeManagementTools
         Write-Log -Message "ADCS Management Tools installed." -Level "SUCCESS" -LogFile $LogFile

@@ -13,21 +13,25 @@ if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
 Write-Log -Message "Starting Post-Hardening Analysis..." -Level "INFO" -LogFile $LogFile
 
 # --- 0. Locksmith ---
-$LocksmithPath = "$PSScriptRoot/../../tools/Invoke-Locksmith.ps1"
-if (-not (Test-Path $LocksmithPath)) {
-    $LocksmithPath = "$PSScriptRoot/../../tools/Locksmith/Invoke-Locksmith.ps1"
-}
-
-if (Test-Path $LocksmithPath) {
-    Write-Log -Message "Found Locksmith at $LocksmithPath. Running in Mode 4..." -Level "INFO" -LogFile $LogFile
-    try {
-        $output = & $LocksmithPath -Mode 4 2>&1 | Out-String
-        Write-Log -Message "Locksmith Output:`n$output" -Level "INFO" -LogFile $LogFile
-    } catch {
-        Write-Log -Message "Failed to run Locksmith: $_" -Level "ERROR" -LogFile $LogFile
-    }
+if ($Global:SkipLocksmith) {
+    Write-Log -Message "Skipping Locksmith as ADCS hardening was skipped." -Level "WARNING" -LogFile $LogFile
 } else {
-    Write-Log -Message "Locksmith not found. Skipping." -Level "WARNING" -LogFile $LogFile
+    $LocksmithPath = "$PSScriptRoot/../../tools/Invoke-Locksmith.ps1"
+    if (-not (Test-Path $LocksmithPath)) {
+        $LocksmithPath = "$PSScriptRoot/../../tools/Locksmith/Invoke-Locksmith.ps1"
+    }
+
+    if (Test-Path $LocksmithPath) {
+        Write-Log -Message "Found Locksmith at $LocksmithPath. Running in Mode 4..." -Level "INFO" -LogFile $LogFile
+        try {
+            $output = & $LocksmithPath -Mode 4 2>&1 | Out-String
+            Write-Log -Message "Locksmith Output:`n$output" -Level "INFO" -LogFile $LogFile
+        } catch {
+            Write-Log -Message "Failed to run Locksmith: $_" -Level "ERROR" -LogFile $LogFile
+        }
+    } else {
+        Write-Log -Message "Locksmith not found. Skipping." -Level "WARNING" -LogFile $LogFile
+    }
 }
 
 # --- 1. Vulnerable Certificate Check (Certify.exe) ---
