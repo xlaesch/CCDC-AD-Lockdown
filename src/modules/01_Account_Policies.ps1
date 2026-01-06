@@ -12,6 +12,12 @@ if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command New-RandomPassword -ErrorAction SilentlyContinue)) {
     . "$PSScriptRoot/../functions/New-RandomPassword.ps1"
 }
+if (-not (Get-Command Read-ConfirmedPassword -ErrorAction SilentlyContinue)) {
+    . "$PSScriptRoot/../functions/Read-ConfirmedPassword.ps1"
+}
+if (-not (Get-Command Protect-SecretsFile -ErrorAction SilentlyContinue)) {
+    . "$PSScriptRoot/../functions/Protect-SecretsFile.ps1"
+}
 Write-Log -Message "Starting Account Policies Hardening..." -Level "INFO" -LogFile $LogFile
 
 # Helper function to check for risky permissions
@@ -74,7 +80,8 @@ function Test-IsSafePrincipal {
     if (-not (Test-Path $PasswordFile)) {
         "SamAccountName,Password" | Out-File -FilePath $PasswordFile -Encoding ASCII
     }
-    Write-Log -Message "Passwords will be saved to $PasswordFile" -Level "INFO" -LogFile $LogFile
+    Write-Log -Message "Passwords will be saved to $PasswordFile and encrypted after execution." -Level "INFO" -LogFile $LogFile
+    $global:RotatedPasswordFile = $PasswordFile
 
     # --- 1. KRBTGT Password Reset (Golden Ticket Mitigation) ---
     Write-Log -Message "Resetting KRBTGT password..." -Level "INFO" -LogFile $LogFile
@@ -554,6 +561,15 @@ function Test-IsSafePrincipal {
         }
     } catch {
         Write-Log -Message "Failed to audit RBCD: $_" -Level "ERROR" -LogFile $LogFile
+    }
+
+    if (-not $global:SecretsEncryptionDeferred) {
+        if (-not $global:SecretsFilePassword) {
+            $global:SecretsFilePassword = Read-ConfirmedPassword -Prompt "Enter secrets file password" -ConfirmPrompt "Confirm secrets file password"
+        }
+        if ($global:SecretsFilePassword) {
+            Protect-SecretsFile -FilePath $PasswordFile -Password $global:SecretsFilePassword -LogFile $LogFile
+        }
     }
 
 

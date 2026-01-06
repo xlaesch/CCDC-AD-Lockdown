@@ -15,6 +15,12 @@ if (-not (Get-Command New-RandomPassword -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command Select-ArrowMenu -ErrorAction SilentlyContinue)) {
     throw "Select-ArrowMenu is not loaded. Run Start-Hardening.ps1 or load the function before running this module."
 }
+if (-not (Get-Command Read-ConfirmedPassword -ErrorAction SilentlyContinue)) {
+    . "$PSScriptRoot/../functions/Read-ConfirmedPassword.ps1"
+}
+if (-not (Get-Command Protect-SecretsFile -ErrorAction SilentlyContinue)) {
+    . "$PSScriptRoot/../functions/Protect-SecretsFile.ps1"
+}
 
 Write-Log -Message "Starting Password Rotation..." -Level "INFO" -LogFile $LogFile
 
@@ -25,7 +31,7 @@ $PasswordFile = "$SecretsDir/rotated_passwords_$(Get-Date -Format 'yyyy-MM-dd_HH
 if (-not (Test-Path $PasswordFile)) {
     "SamAccountName,Password" | Out-File -FilePath $PasswordFile -Encoding ASCII
 }
-Write-Log -Message "Passwords will be saved to $PasswordFile" -Level "INFO" -LogFile $LogFile
+Write-Log -Message "Passwords will be saved to $PasswordFile and encrypted after execution." -Level "INFO" -LogFile $LogFile
 $global:RotatedPasswordFile = $PasswordFile
 
 $rotationOptions = @(
@@ -128,5 +134,14 @@ switch ($rotationChoice) {
     }
     default {
         Write-Log -Message "Skipping domain user password rotation per user request." -Level "INFO" -LogFile $LogFile
+    }
+}
+
+if (-not $global:SecretsEncryptionDeferred) {
+    if (-not $global:SecretsFilePassword) {
+        $global:SecretsFilePassword = Read-ConfirmedPassword -Prompt "Enter secrets file password" -ConfirmPrompt "Confirm secrets file password"
+    }
+    if ($global:SecretsFilePassword) {
+        Protect-SecretsFile -FilePath $PasswordFile -Password $global:SecretsFilePassword -LogFile $LogFile
     }
 }

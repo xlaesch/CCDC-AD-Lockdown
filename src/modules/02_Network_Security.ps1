@@ -332,11 +332,16 @@ try {
 
 Write-Log -Message "Applying Default Block Policy (Inbound/Outbound)..." -Level "WARNING" -LogFile $LogFile
 try {
-    netsh a s allp firewallpolicy "blockinbound,blockoutbound"
-    # Commenting out for safety in this refactor step. Uncomment to enable full lockdown.
-    Write-Log -Message "Default Block Policy is currently COMMENTED OUT in script for safety." -Level "INFO" -LogFile $LogFile
+    Write-Host "IMPACT: Setting the default firewall policy to BlockInbound,BlockOutbound will cut off all network access unless explicit ALLOW rules exist. Ensure all necessary ALLOW rules are perfect before proceeding." -ForegroundColor Red
+    $blockPolicy = Read-Host "Do you want to apply the Default Block Policy (BlockInbound, BlockOutbound)? [y/n]"
+    if ($blockPolicy -eq 'y') {
+        netsh advfirewall set allprofiles firewallpolicy "blockinbound,blockoutbound"
+        Write-Log -Message "Default Block Policy applied." -Level "SUCCESS" -LogFile $LogFile
+    } else {
+        Write-Log -Message "Skipping Default Block Policy to avoid network lockout." -Level "WARNING" -LogFile $LogFile
+    }
 } catch {
-    Write-Log -Message "Failed to set firewall policy." -Level "ERROR" -LogFile $LogFile
+    Write-Log -Message "Failed to set firewall policy: $_" -Level "ERROR" -LogFile $LogFile
 }
 
 # Enable Firewall Logging

@@ -1,5 +1,9 @@
 # AD-Lockdown
 
+## TODO
+- [x] Lock the secrets file with a password
+- [] Understand what installing an enterprise root CA means on an environment with no ADCS
+
 ## Overview
 AD-Lockdown is an Active Directory hardening toolkit intended to run on Windows Domain Controllers. `Start-Hardening.ps1` orchestrates a set of modules that apply security controls, logging all actions to a daily log file.
 
@@ -15,9 +19,13 @@ AD-Lockdown is an Active Directory hardening toolkit intended to run on Windows 
 
 ## Outputs and artifacts
 - Logs: `logs/hardening_YYYY-MM-DD.log`
-- Secrets (password rotations): `secrets/rotated_passwords_YYYY-MM-DD_HH-mm.csv`
+- Secrets (password rotations): `secrets/rotated_passwords_YYYY-MM-DD_HH-mm.csv.enc` (AES-256 encrypted; password required)
 - Reports: `reports/PingCastle`, `reports/BloodHound`
 - Backups: `C:\Program Files\Windows Mail_Backup\DNS`, `C:\Program Files\Windows Mail_Backup\AD`, `C:\Program Files\Windows Mail_Backup\SYSVOL`
+
+## Decrypting secrets
+- Decrypt a secrets file: `.\Decrypt-Secrets.ps1 -EncryptedPath secrets\rotated_passwords_YYYY-MM-DD_HH-mm.csv.enc`
+- Optional: `-OutputPath` to set destination, `-RemoveEncrypted` to delete the `.enc` after decrypting.
 
 ## Control catalog
 Status legend: APPLIED, CONDITIONAL, INTERACTIVE, AUDIT-ONLY, SKIPPED.

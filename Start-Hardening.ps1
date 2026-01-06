@@ -25,6 +25,8 @@ if (-not (Test-Path $LogDir)) {
 . "$ScriptRoot/src/functions/Write-Log.ps1"
 . "$ScriptRoot/src/functions/Set-RegistryValue.ps1"
 . "$ScriptRoot/src/functions/New-RandomPassword.ps1"
+. "$ScriptRoot/src/functions/Read-ConfirmedPassword.ps1"
+. "$ScriptRoot/src/functions/Protect-SecretsFile.ps1"
 
 function Install-Sysinternals {
     param (
@@ -289,6 +291,17 @@ if ($ModulesToExecute.Count -eq 0) {
     exit
 }
 
+$SecretsModules = @(
+    "00_Password_Rotation.ps1",
+    "01_Account_Policies.ps1"
+)
+
+if ($ModulesToExecute | Where-Object { $SecretsModules -contains $_ }) {
+    $global:SecretsEncryptionDeferred = $true
+    $global:SecretsFilePassword = Read-ConfirmedPassword -Prompt "Enter secrets file password" -ConfirmPrompt "Confirm secrets file password"
+    Write-Log -Message "Secrets output will be encrypted after module execution." -Level "INFO" -LogFile $LogFile
+}
+
 foreach ($Module in $ModulesToExecute) {
     $ModulePath = "$ScriptRoot/src/modules/$Module"
     if (Test-Path $ModulePath) {
@@ -302,6 +315,10 @@ foreach ($Module in $ModulesToExecute) {
     } else {
         Write-Log -Message "Module not found: $Module" -Level "WARNING" -LogFile $LogFile
     }
+}
+
+if ($global:SecretsFilePassword -and $global:RotatedPasswordFile) {
+    Protect-SecretsFile -FilePath $global:RotatedPasswordFile -Password $global:SecretsFilePassword -LogFile $LogFile
 }
 
 Write-Log -Message "=== AD Hardening Process Complete ===" -Level "INFO" -LogFile $LogFile
