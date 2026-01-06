@@ -121,9 +121,13 @@ function Unprotect-SecretsFile {
 
         Write-SecretLog -Message "Decrypted secrets file saved to $OutputPath." -Level "SUCCESS"
     } catch {
-        Write-SecretLog -Message "Failed to decrypt secrets file: $_" -Level "ERROR"
+        if ($_.Exception.InnerException.Message -match "Padding is invalid" -or $_.Exception.Message -match "Padding is invalid") {
+            Write-SecretLog -Message "Failed to decrypt. The password provided is likely incorrect." -Level "ERROR"
+        } else {
+            Write-SecretLog -Message "Failed to decrypt secrets file: $_" -Level "ERROR"
+        }
     } finally {
-        if ($cryptoStream) { $cryptoStream.Dispose() }
+        if ($cryptoStream) { try { $cryptoStream.Dispose() } catch {} }
         if ($decryptor) { $decryptor.Dispose() }
         if ($memoryStream) { $memoryStream.Dispose() }
         if ($aes) { $aes.Dispose() }
